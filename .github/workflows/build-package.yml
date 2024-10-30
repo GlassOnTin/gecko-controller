@@ -38,16 +38,9 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y devscripts debhelper python3-all dh-python
           sudo apt-get install -y python3-setuptools python3-pip
-          sudo apt-get install -y python3-rpi.gpio python3-smbus
 
-      - name: Install Python dependencies
-        run: |
-          pip3 install --user \
-            adafruit-circuitpython-displayio-sh1107 \
-            adafruit-circuitpython-display-text \
-            adafruit-circuitpython-bitmap-font \
-            adafruit-blinka \
-            adafruit-circuitpython-busdevice
+      # We don't need to install runtime dependencies for building
+      # They will be handled by the debian/control file dependencies
 
       - name: Build package
         run: dpkg-buildpackage -us -uc
