@@ -19,6 +19,7 @@ A Raspberry Pi-based temperature and light controller for gecko enclosure monito
 - Raspberry Pi (any model with GPIO pins)
 - SH1107 OLED Display
 - SHT31 Temperature/Humidity Sensor
+- AS7331 Spectral UV Sensor
 - Relay modules for light and heat control
 - Compatible power supply
 
