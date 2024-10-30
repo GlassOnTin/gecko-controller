@@ -13,34 +13,32 @@ from adafruit_display_text import label
 from adafruit_bitmap_font import bitmap_font
 from .as7331 import AS7331, INTEGRATION_TIME_256MS, GAIN_16X
 
+# Import config
+try:
+    from gecko_controller.config import *
+except ImportError:
+    try:
+        import sys
+        sys.path.append('/etc/gecko-controller')
+        from config import *
+    except ImportError:
+        print("Error: Could not find configuration file")
+        print("The file should be at: /etc/gecko-controller/config.py")
+        print("Try reinstalling the package with: sudo apt install --reinstall gecko-controller")
+        sys.exit(1)
+
 # Get the directory where the module is installed
 MODULE_DIR = os.path.dirname(os.path.abspath(__file__))
 FONT_PATH = os.path.join(MODULE_DIR, "fonts", "forkawesome-12.pcf")
 
 # GPIO Setup
 GPIO.setmode(GPIO.BCM)
-LIGHT_RELAY = 4
-HEAT_RELAY = 17
-DISPLAY_RESET = 21
 
 # Configure GPIO pins
 GPIO.setup(LIGHT_RELAY, GPIO.OUT)
 GPIO.setup(HEAT_RELAY, GPIO.OUT)
 GPIO.setup(DISPLAY_RESET, GPIO.OUT)
 GPIO.output(DISPLAY_RESET, GPIO.HIGH)  # Start with reset inactive
-
-# Temperature Settings
-MIN_TEMP = 15.0
-DAY_TEMP = 30.0
-TEMP_TOLERANCE = 0.5
-
-# Time Settings
-LIGHT_ON_HOUR = 6
-LIGHT_OFF_HOUR = 18
-
-# UV Settings
-MAX_UVA = 100.0  # μW/cm²
-MAX_UVB = 50.0   # μW/cm²
 
 # Icon characters from Fork Awesome
 ICON_CLOCK = "\uf017"
@@ -49,7 +47,7 @@ ICON_THERMOMETER = "\uf2c9"
 ICON_TINT = "\uf043"
 ICON_TARGET = "\uf140"
 ICON_GOOD = "\uf118"       # Smiling face
-ICON_TOO_LOW = "\uf119 "   # Sad face
+ICON_TOO_LOW = "\uf119"    # Sad face
 ICON_TOO_HIGH = "\uf071"   # Warning triangle
 ICON_ERROR = "\uf29c"      # Question circle
 
@@ -65,16 +63,9 @@ class GeckoController:
         self.uv_sensor.integration_time = INTEGRATION_TIME_256MS
         self.uv_sensor.gain = GAIN_16X
 
-        # UV Thresholds (calibrated for specific sensor and setup)
-        self.UVA_THRESHOLDS = {
-            'low': 50.0,
-            'high': 100.0
-        }
-
-        self.UVB_THRESHOLDS = {
-            'low': 2.0,
-            'high': 5.0
-        }
+        # Use thresholds from config
+        self.UVA_THRESHOLDS = UVA_THRESHOLDS
+        self.UVB_THRESHOLDS = UVB_THRESHOLDS
 
     def setup_display(self):
         """Initialize the display"""
