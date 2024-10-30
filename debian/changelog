@@ -1,3 +1,11 @@
+gecko-controller (0.2.0) stable; urgency=medium
+
+  * Added UV light monitoring using AS7331 sensor
+  * Integrated UV readings into OLED display
+  * Updated dependency management for AS7331 library
+
+ -- Ian Ross Williams <ianrosswilliams@gmail.com>  Wed, 30 Oct 2024 17:00:00 +0000
+
 gecko-controller (0.1.0) stable; urgency=medium
 
   * Initial release

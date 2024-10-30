@@ -11,6 +11,7 @@ import displayio
 import terminalio
 from adafruit_display_text import label
 from adafruit_bitmap_font import bitmap_font
+from .as7331 import AS7331, INTEGRATION_TIME_256MS, GAIN_16X
 
 # Get the directory where the module is installed
 MODULE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -37,20 +38,43 @@ TEMP_TOLERANCE = 0.5
 LIGHT_ON_HOUR = 6
 LIGHT_OFF_HOUR = 18
 
+# UV Settings
+MAX_UVA = 100.0  # μW/cm²
+MAX_UVB = 50.0   # μW/cm²
+
 # Icon characters from Fork Awesome
 ICON_CLOCK = "\uf017"
 ICON_LIGHTBULB = "\uf0eb"
 ICON_THERMOMETER = "\uf2c9"
-ICON_TINT = "\uf043"  # Water drop for humidity
-ICON_TARGET = "\uf140"  # Target/bullseye for target temperature
+ICON_TINT = "\uf043"
+ICON_TARGET = "\uf140"
+ICON_GOOD = "\uf118"       # Smiling face
+ICON_TOO_LOW = "\uf119 "   # Sad face
+ICON_TOO_HIGH = "\uf071"   # Warning triangle
+ICON_ERROR = "\uf29c"      # Question circle
 
 class GeckoController:
     def __init__(self):
         self.setup_display()
         self.bus = smbus.SMBus(1)
-        # Load the Fork Awesome font from the package directory
         self.icon_font = bitmap_font.load_font(FONT_PATH)
         self.regular_font = terminalio.FONT
+
+        # Initialize UV sensor
+        self.uv_sensor = AS7331(1)
+        self.uv_sensor.integration_time = INTEGRATION_TIME_256MS
+        self.uv_sensor.gain = GAIN_16X
+
+        # UV Thresholds (calibrated for specific sensor and setup)
+        self.UVA_THRESHOLDS = {
+            'low': 50.0,
+            'high': 100.0
+        }
+
+        self.UVB_THRESHOLDS = {
+            'low': 2.0,
+            'high': 5.0
+        }
 
     def setup_display(self):
         """Initialize the display"""
@@ -95,147 +119,149 @@ class GeckoController:
         current_hour = datetime.now().hour
         return DAY_TEMP if LIGHT_ON_HOUR <= current_hour < LIGHT_OFF_HOUR else MIN_TEMP
 
-    def create_display_group(self, temp, humidity, light_status, heat_status):
-        """Create a fresh display group with current values"""
+
+    def get_uv_status_icon(self, value, is_uvb=False):
+        """
+        Get status icon for UV readings with sunglasses for too high.
+
+        Args:
+            value (float): UV reading
+            is_uvb (bool): True if reading is UVB, False if UVA
+
+        Returns:
+            str: Icon character representing the status
+        """
+        if value is None:
+            return ICON_ERROR  # Sensor error or no reading
+
+        thresholds = self.UVB_THRESHOLDS if is_uvb else self.UVA_THRESHOLDS
+
+        if value < thresholds['low']:
+            return ICON_TOO_LOW    # Arrow pointing up - needs more UV
+        elif value > thresholds['high']:
+            return ICON_TOO_HIGH   # Sunglasses - too bright/high UV
+        else:
+            return ICON_GOOD       # Just right - happy face
+
+    def create_display_group(self, temp, humidity, uva, uvb, uvc, light_status, heat_status):
         group = displayio.Group()
 
-        # Current time with clock icon
+        # Top row - Time and Humidity
         current_time = datetime.now().strftime("%H:%M")
-        clock_icon = label.Label(
-            self.icon_font,
-            text=ICON_CLOCK,
-            color=0xFFFFFF,
-            anchor_point=(0.0, 0.0),
-            anchored_position=(4, 4),
-            base_alignment=True
-        )
-        time_label = label.Label(
-            self.regular_font,
-            text=current_time,
-            color=0xFFFFFF,
-            anchor_point=(0.0, 0.0),
-            anchored_position=(20, 4),
-            base_alignment=True
-        )
+        clock_icon = label.Label(self.icon_font, text=ICON_CLOCK, color=0xFFFFFF,
+                            anchor_point=(0.0, 0.0), anchored_position=(4, 4))
+        time_label = label.Label(self.regular_font, text=current_time, color=0xFFFFFF,
+                            anchor_point=(0.0, 0.0), anchored_position=(20, 4))
 
-        # Temperature with current and target values
+        # Humidity on top right
+        humidity_text = f"{humidity:4.1f}%" if humidity is not None else "--.-%"
+        humidity_icon = label.Label(self.icon_font, text=ICON_TINT, color=0xFFFFFF,
+                                anchor_point=(0.0, 0.0), anchored_position=(68, 4))
+        humidity_label = label.Label(self.regular_font, text=humidity_text, color=0xFFFFFF,
+                                anchor_point=(0.0, 0.0), anchored_position=(84, 4))
+
+        # Second row - Current and Target Temperature
         if temp is not None:
             target_temp = self.get_target_temp()
             temp_text = f"{temp:4.1f}C"
-            target_text = f"→{target_temp:4.1f}C"
+            target_text = f"{target_temp:4.1f}C"
         else:
             temp_text = "--.-C"
-            target_text = "→--.-C"
+            target_text = "--.-C"
 
-        temp_icon = label.Label(
+        temp_icon = label.Label(self.icon_font, text=ICON_THERMOMETER, color=0xFFFFFF,
+                            anchor_point=(0.0, 0.0), anchored_position=(4, 20))
+        temp_label = label.Label(self.regular_font, text=temp_text, color=0xFFFFFF,
+                            anchor_point=(0.0, 0.0), anchored_position=(20, 20))
+
+        target_icon = label.Label(self.icon_font, text=ICON_TARGET, color=0xFFFFFF,
+                                anchor_point=(0.0, 0.0), anchored_position=(68, 20))
+        target_label = label.Label(self.regular_font, text=target_text, color=0xFFFFFF,
+                                anchor_point=(0.0, 0.0), anchored_position=(84, 20))
+
+        # Third row - UV readings side by side
+        # UVA on left, UVB on right
+        # UV status display with clear directional indicators
+        uva_icon = self.get_uv_status_icon(uva, is_uvb=False)
+        uvb_icon = self.get_uv_status_icon(uvb, is_uvb=True)
+
+        # UVA Display
+        uva_label = label.Label(
+            self.regular_font,
+            text="UVA",
+            color=0xFFFFFF,
+            anchor_point=(0.0, 0.0),
+            anchored_position=(4, 36)
+        )
+        uva_status = label.Label(
             self.icon_font,
-            text=ICON_THERMOMETER,
+            text=uva_icon,
             color=0xFFFFFF,
             anchor_point=(0.0, 0.0),
-            anchored_position=(4, 20),
-            base_alignment=True
+            anchored_position=(36, 36)
         )
-        temp_label = label.Label(
+
+        # UVB Display
+        uvb_label = label.Label(
             self.regular_font,
-            text=temp_text,
+            text="UVB",
             color=0xFFFFFF,
             anchor_point=(0.0, 0.0),
-            anchored_position=(20, 20),
-            base_alignment=True
+            anchored_position=(68, 36)
         )
-        target_icon = label.Label(
+        uvb_status = label.Label(
             self.icon_font,
-            text=ICON_TARGET,
+            text=uvb_icon,
             color=0xFFFFFF,
             anchor_point=(0.0, 0.0),
-            anchored_position=(65, 20),
-            base_alignment=True
-        )
-        target_label = label.Label(
-            self.regular_font,
-            text=target_text,
-            color=0xFFFFFF,
-            anchor_point=(0.0, 0.0),
-            anchored_position=(81, 20),
-            base_alignment=True
+            anchored_position=(100, 36)
         )
 
-        # Humidity
-        humidity_text = f"{humidity:4.1f}%" if humidity is not None else "--.-%"
-        humidity_icon = label.Label(
-            self.icon_font,
-            text=ICON_TINT,
-            color=0xFFFFFF,
-            anchor_point=(0.0, 0.0),
-            anchored_position=(4, 36),
-            base_alignment=True
-        )
-        humidity_label = label.Label(
-            self.regular_font,
-            text=humidity_text,
-            color=0xFFFFFF,
-            anchor_point=(0.0, 0.0),
-            anchored_position=(20, 36),
-            base_alignment=True
-        )
+        # Bottom row - Status and Schedule
+        status_text = f"{'L:ON ' if light_status else 'L:OFF'} {'H:ON' if heat_status else 'H:OFF'}"
+        status_label = label.Label(self.regular_font, text=status_text, color=0xFFFFFF,
+                                anchor_point=(0.0, 0.0), anchored_position=(4, 52))
 
-        # Light and heat status
-        light_icon = label.Label(
-            self.icon_font,
-            text=ICON_LIGHTBULB,
-            color=0xFFFFFF,
-            anchor_point=(0.0, 0.0),
-            anchored_position=(65, 36),
-            base_alignment=True
-        )
-        status_text = f"{'ON ' if light_status else 'OFF'}"
-        light_label = label.Label(
-            self.regular_font,
-            text=status_text,
-            color=0xFFFFFF,
-            anchor_point=(0.0, 0.0),
-            anchored_position=(81, 36),
-            base_alignment=True
-        )
-
-        # Heat status on its own line
-        heat_label = label.Label(
-            self.regular_font,
-            text=f"{'ON ' if heat_status else 'OFF'}",
-            color=0xFFFFFF,
-            anchor_point=(0.0, 0.0),
-            anchored_position=(4, 52),
-            base_alignment=True
-        )
-
-        # Next transition time
         next_state, next_time = self.get_next_transition()
         time_until = self.format_time_until(next_time)
-        schedule_text = f"{next_state} in {time_until}"
-        schedule_label = label.Label(
-            self.regular_font,
-            text=schedule_text,
-            color=0xFFFFFF,
-            anchor_point=(0.0, 0.0),
-            anchored_position=(32, 52),
-            base_alignment=True
-        )
+        schedule_text = f"{next_state} {time_until}"
+        schedule_label = label.Label(self.regular_font, text=schedule_text, color=0xFFFFFF,
+                                anchor_point=(1.0, 0.0),
+                                anchored_position=(124, 52))
 
-        # Add all elements to the group
-        group.append(clock_icon)
-        group.append(time_label)
-        group.append(temp_icon)
-        group.append(temp_label)
-        group.append(target_icon)
-        group.append(target_label)
-        group.append(humidity_icon)
-        group.append(humidity_label)
-        group.append(light_icon)
-        group.append(light_label)
-        group.append(heat_label)
-        group.append(schedule_label)
+        # Add all elements to group
+        for element in [
+            clock_icon, time_label,         # Top left
+            humidity_icon, humidity_label,  # Top right
+            temp_icon, temp_label,          # Second row left
+            target_icon, target_label,      # Second row right
+            uva_label, uva_status,          # Third row left
+            uvb_label, uvb_status,          # Third row right
+            status_label, schedule_label    # Bottom row
+        ]:
+            group.append(element)
 
         return group
+
+    def run(self):
+        try:
+            self.update_display(None, None, None, None, None, False, False)
+
+            while True:
+                temp, humidity = self.read_sensor()
+                uva, uvb, uvc = self.read_uv()
+
+                if temp is not None and humidity is not None:
+                    light_status = self.control_light()
+                    heat_status = self.control_heat(temp)
+                    self.update_display(temp, humidity, uva, uvb, uvc,
+                                      light_status, heat_status)
+                time.sleep(2)
+
+        except KeyboardInterrupt:
+            print("\nShutting down...")
+        finally:
+            GPIO.cleanup()
 
     def read_sensor(self):
         try:
@@ -252,8 +278,29 @@ class GeckoController:
             print(f"Sensor read error: {e}")
             return None, None
 
-    def update_display(self, temp, humidity, light_status, heat_status):
-        new_group = self.create_display_group(temp, humidity, light_status, heat_status)
+    def read_uv(self):
+        try:
+            uva, uvb, uvc, temp = self.uv_sensor.values
+            return uva, uvb, uvc
+        except Exception as e:
+            print(f"UV sensor read error: {e}")
+            return None, None, None
+
+    def update_display(self, temp, humidity, uva, uvb, uvc, light_status, heat_status):
+        """
+        Update the display with current sensor readings and status.
+
+        Args:
+            temp (float): Temperature reading
+            humidity (float): Humidity reading
+            uva (float): UVA reading
+            uvb (float): UVB reading
+            uvc (float): UVC reading
+            light_status (bool): Light relay status
+            heat_status (bool): Heat relay status
+        """
+        new_group = self.create_display_group(temp, humidity, uva, uvb, uvc,
+                                            light_status, heat_status)
         self.display.root_group = new_group
 
     def control_light(self):
@@ -276,22 +323,7 @@ class GeckoController:
             return False
         return GPIO.input(HEAT_RELAY)
 
-    def run(self):
-        try:
-            self.update_display(None, None, False, False)
 
-            while True:
-                temp, humidity = self.read_sensor()
-                if temp is not None and humidity is not None:
-                    light_status = self.control_light()
-                    heat_status = self.control_heat(temp)
-                    self.update_display(temp, humidity, light_status, heat_status)
-                time.sleep(2)
-
-        except KeyboardInterrupt:
-            print("\nShutting down...")
-        finally:
-            GPIO.cleanup()
 
 def main():
     controller = GeckoController()

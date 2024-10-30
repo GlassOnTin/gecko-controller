@@ -13,6 +13,7 @@ echo "Cleaning project in: $PROJECT_ROOT"
 rm -rf "${PROJECT_ROOT}/debian/.debhelper/"
 rm -rf "${PROJECT_ROOT}/debian/gecko-controller/"
 rm -f "${PROJECT_ROOT}/debian/files"
+rm -f "${PROJECT_ROOT}/debian"/*.debhelper
 rm -f "${PROJECT_ROOT}/debian"/*.debhelper.log
 rm -f "${PROJECT_ROOT}/debian"/*.substvars
 rm -f "${PROJECT_ROOT}/debian/debhelper-build-stamp"

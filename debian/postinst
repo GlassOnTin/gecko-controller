@@ -28,6 +28,10 @@ cleanup_temporary_swap() {
     fi
 }
 
+get_python_version() {
+    "$VENV_DIR/bin/python3" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")'
+}
+
 case "$1" in
     configure)
         log "Starting gecko-controller installation on $(uname -n)"
@@ -38,6 +42,10 @@ case "$1" in
         # Create virtual environment
         log "Creating virtual environment in $VENV_DIR"
         python3 -m venv "$VENV_DIR"
+
+        # Get Python version for site-packages path
+        PYTHON_VERSION=$(get_python_version)
+        log "Detected Python version: $PYTHON_VERSION"
 
         # Upgrade pip and install wheel
         log "Upgrading pip and installing wheel"
@@ -51,13 +59,13 @@ case "$1" in
         "$VENV_DIR/bin/pip" install \
             'adafruit-circuitpython-displayio-sh1107' \
             'adafruit-circuitpython-display-text' \
-            'adafruit-circuitpython-bitmap-font'
+            'adafruit-circuitpython-bitmap-font' \
+            'adafruit-blinka' \
+            'adafruit-circuitpython-busdevice'
 
         # Install smbus with resource limitations
         log "Installing smbus (this may take several minutes)"
-        # Limit make to use only one core and reduce memory usage
         export MAKEFLAGS="-j1"
-        # Use pip's build isolation to prevent memory issues
         "$VENV_DIR/bin/pip" install --no-cache-dir --no-build-isolation 'smbus'
 
         # Clean up temporary swap
