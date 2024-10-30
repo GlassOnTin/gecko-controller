@@ -5,6 +5,11 @@ on:
     tags:
       - 'v*.*.*'  # Run on version tags
 
+# Add permissions block at workflow level
+permissions:
+  contents: write    # This is required for creating releases
+  packages: write    # If you need to publish packages
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -38,9 +43,6 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y devscripts debhelper python3-all dh-python
           sudo apt-get install -y python3-setuptools python3-pip
-
-      # We don't need to install runtime dependencies for building
-      # They will be handled by the debian/control file dependencies
 
       - name: Build package
         run: dpkg-buildpackage -us -uc
