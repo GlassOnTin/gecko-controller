@@ -1,8 +1,12 @@
 from setuptools import setup, find_packages
 
+# Import version from version.py
+with open('gecko_controller/version.py', 'r') as f:
+    exec(f.read())
+
 setup(
     name="gecko_controller",
-    version="0.2.0",
+    version=VERSION,
     packages=find_packages(),
     install_requires=[
         "RPi.GPIO",
