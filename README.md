@@ -1,23 +1,25 @@
 # Gecko Controller
 
-A Raspberry Pi-based temperature and light controller for gecko enclosure monitoring and control.
+A Raspberry Pi-based temperature, light, and UV controller for gecko enclosure monitoring and control.
 
 ## Features
 
 - Real-time temperature and humidity monitoring
+- UV light level monitoring (UVA and UVB)
 - Automated light cycle control
 - Temperature-based heating control
 - OLED display showing:
   - Current time
   - Temperature and humidity readings
   - Target temperature
+  - UV status indicators
   - Light and heat status
   - Time until next light transition
 
 ## Hardware Requirements
 
-- Raspberry Pi (any model with GPIO pins)
-- SH1107 OLED Display
+- Raspberry Pi (tested on Pi Zero 2 W)
+- SH1107 OLED Display (I2C)
 - SHT31 Temperature/Humidity Sensor
 - AS7331 Spectral UV Sensor
 - Relay modules for light and heat control
@@ -25,34 +27,48 @@ A Raspberry Pi-based temperature and light controller for gecko enclosure monito
 
 ## Installation
 
-1. Install Poetry if you haven't already:
+### From Debian Package
+
+1. Download the latest .deb package from the releases page:
 ```bash
-curl -sSL https://install.python-poetry.org | python3 -
+wget https://github.com/YOUR-USERNAME/gecko-controller/releases/latest/download/gecko-controller_X.Y.Z_all.deb
 ```
 
-2. Clone the repository and install dependencies:
+2. Install the package and its dependencies:
 ```bash
-git clone https://github.com/yourusername/gecko-controller.git
-cd gecko-controller
-poetry install
+sudo apt install ./gecko-controller_X.Y.Z_all.deb
 ```
 
-3. Copy the Fork Awesome font to the fonts directory:
+The installation will:
+- Install required Python dependencies
+- Set up the systemd service
+- Create configuration directory at `/etc/gecko-controller`
+
+### Service Management
+
+Start the service:
 ```bash
-mkdir -p gecko_controller/fonts
-cp forkawesome-12.pcf gecko_controller/fonts/
+sudo systemctl start gecko-controller
 ```
 
-## Usage
-
-Run the controller:
+Enable automatic start at boot:
 ```bash
-poetry run gecko-controller
+sudo systemctl enable gecko-controller
+```
+
+Check service status:
+```bash
+sudo systemctl status gecko-controller
+```
+
+View service logs:
+```bash
+sudo journalctl -u gecko-controller
 ```
 
 ## Configuration
 
-The following parameters can be adjusted in `controller.py`:
+The configuration file is located at `/etc/gecko-controller/config.py`. You can adjust:
 
 - `MIN_TEMP`: Minimum (night) temperature
 - `DAY_TEMP`: Target daytime temperature
@@ -60,11 +76,31 @@ The following parameters can be adjusted in `controller.py`:
 - `LIGHT_ON_HOUR`: Hour to turn lights on (24-hour format)
 - `LIGHT_OFF_HOUR`: Hour to turn lights off (24-hour format)
 
+After changing the configuration, restart the service:
+```bash
+sudo systemctl restart gecko-controller
+```
+
 ## GPIO Pin Configuration
 
+Default GPIO assignments:
 - Light Relay: GPIO 4
 - Heat Relay: GPIO 17
 - Display Reset: GPIO 21
+
+## Building from Source
+
+1. Install build dependencies:
+```bash
+./install_build_deps.sh
+```
+
+2. Build the Debian package:
+```bash
+dpkg-buildpackage -us -uc
+```
+
+The built package will be created in the parent directory.
 
 ## Contributing
 
