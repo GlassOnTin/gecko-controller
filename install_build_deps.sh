@@ -9,6 +9,7 @@ sudo apt-get install -y \
     python3-all \
     python3-setuptools \
     python3-pip \
+    python3-venv \
     devscripts \
     dh-virtualenv \
     build-essential \
