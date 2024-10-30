@@ -1,4 +1,4 @@
-gecko-controller (0.2.7) UNRELEASED; urgency=medium
+gecko-controller (0.2.8) UNRELEASED; urgency=medium
 
   * New release 0.2.1
   * New release 0.2.2
@@ -8,8 +8,9 @@ gecko-controller (0.2.7) UNRELEASED; urgency=medium
   * New release 0.2.5
   * New release 0.2.6
   * New release 0.2.7
+  * New release 0.2.8
 
- -- ian <ian@msi-z790>  Wed, 30 Oct 2024 23:19:43 +0000
+ -- ian <ian@msi-z790>  Wed, 30 Oct 2024 23:33:05 +0000
 
 gecko-controller (0.2.0) stable; urgency=medium
 
