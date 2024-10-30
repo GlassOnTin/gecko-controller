@@ -5,10 +5,9 @@ on:
     tags:
       - 'v*.*.*'  # Run on version tags
 
-# Add permissions block at workflow level
 permissions:
-  contents: write    # This is required for creating releases
-  packages: write    # If you need to publish packages
+  contents: write
+  packages: write
 
 jobs:
   build:
@@ -61,11 +60,16 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Move build artifacts to workspace
+        run: |
+          mkdir -p artifacts
+          cp ../gecko-controller_*.deb artifacts/
+          cp ../gecko-controller_*.buildinfo artifacts/
+          cp ../gecko-controller_*.changes artifacts/
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: debian-packages
-          path: |
-            ../gecko-controller_*.deb
-            ../gecko-controller_*.buildinfo
-            ../gecko-controller_*.changes
+          path: artifacts/
+          if-no-files-found: error
