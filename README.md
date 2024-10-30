@@ -2,6 +2,20 @@
 
 A Raspberry Pi-based temperature, light, and UV controller for gecko enclosure monitoring and control.
 
+<div align="center">
+  <img src="diablo.jpg" alt="Diablo the Leopard Gecko" width="400"/>
+  <p><em>Diablo the Leopard Gecko, for whom this controller was built</em></p>
+</div>
+
+## Overview
+
+This project provides automated environmental control and monitoring for a gecko enclosure, with real-time feedback via an OLED display.
+
+<div align="center">
+  <img src="display.jpg" alt="OLED Display Interface" width="400"/>
+  <p><em>The OLED display showing temperature, humidity, UV levels, and system status</em></p>
+</div>
+
 ## Features
 
 - Real-time temperature and humidity monitoring
