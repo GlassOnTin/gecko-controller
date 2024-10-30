@@ -1,0 +1,20 @@
+#!/usr/bin/make -f
+
+export PYBUILD_NAME=gecko_controller
+export PYBUILD_SYSTEM=distutils
+export DH_VERBOSE=1
+
+%:
+	dh $@ --with python3 --buildsystem=pybuild
+
+override_dh_auto_install:
+	dh_auto_install
+	mkdir -p debian/gecko-controller/usr/bin
+	mkdir -p debian/gecko-controller/etc/gecko-controller
+	mkdir -p debian/gecko-controller/lib/systemd/system
+	install -m 755 debian/gecko-controller.sh debian/gecko-controller/usr/bin/gecko-controller
+	install -m 644 debian/gecko-controller.service debian/gecko-controller/lib/systemd/system/
+	install -m 644 debian/config.py debian/gecko-controller/etc/gecko-controller/
+
+override_dh_auto_test:
+	:

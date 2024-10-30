@@ -1,0 +1,28 @@
+Source: gecko-controller
+Section: misc
+Priority: optional
+Maintainer: Ian Ross Williams <ianrosswilliams@gmail.com>
+Build-Depends: debhelper (>= 10),
+               dh-python,
+               python3-all,
+               python3-setuptools,
+               python3-pip,
+               python3-venv
+
+Package: gecko-controller
+Architecture: all
+Depends: ${python3:Depends},
+         ${misc:Depends},
+         python3-pip,
+         python3-venv,
+         python3-dev,
+         i2c-tools,
+         libi2c-dev,
+         python3 (>= 3.9)
+Description: Raspberry Pi Gecko Enclosure Controller
+ Automated temperature and light controller for gecko enclosure
+ with OLED display support. Features include:
+  * Temperature and humidity monitoring
+  * Light cycle control
+  * Heat management
+  * OLED status display

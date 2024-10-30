@@ -1,0 +1,24 @@
+#!/bin/sh
+set -e
+
+VENV_DIR="/opt/gecko-controller/venv"
+SWAP_FILE="/tmp/gecko-install-swap"
+
+case "$1" in
+    remove|purge)
+        # Stop and disable the service
+        systemctl stop gecko-controller || true
+        systemctl disable gecko-controller || true
+
+        # Remove the virtual environment
+        rm -rf "$VENV_DIR"
+
+        # Clean up swap file if it exists
+        if [ -f "$SWAP_FILE" ]; then
+            swapoff "$SWAP_FILE" || true
+            rm -f "$SWAP_FILE"
+        fi
+        ;;
+esac
+
+#DEBHELPER#

@@ -1,0 +1,8 @@
+gecko-controller (0.1.0) stable; urgency=medium
+
+  * Initial release
+  * Basic temperature and light control functionality
+  * OLED display support
+  * Systemd service integration
+
+ -- Ian Ross Williams <ianrosswilliams@gmail.com>  Wed, 30 Oct 2024 00:00:00 +0000
