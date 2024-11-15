@@ -20,6 +20,7 @@ A Raspberry Pi-based temperature, light, and UV controller for gecko enclosure m
   - UV levels with status indicators
   - Light and heat status
   - Time until next light transition
+- Logging of environmental conditions
 
 ## Hardware Requirements
 
@@ -77,33 +78,44 @@ A Raspberry Pi-based temperature, light, and UV controller for gecko enclosure m
 Create or modify `/etc/gecko-controller/config.py` with your settings:
 
 ```python
-# Temperature Settings (°C)
-MIN_TEMP = 20.0        # Night temperature
-DAY_TEMP = 26.0        # Day temperature
-TEMP_TOLERANCE = 0.5   # Temperature control deadband
+# Gecko Controller Configuration File
+# This file will be installed to /etc/gecko-controller/config.py
+# You can modify these values to customize your gecko enclosure settings
+# The service must be restarted after changes: sudo systemctl restart gecko-controller
 
-# Schedule (24-hour format)
-LIGHT_ON_HOUR = 8      # Hour to turn lights on
-LIGHT_OFF_HOUR = 20    # Hour to turn lights off
+# Display I2C
+DISPLAY_ADDRESS = 0x3c
 
-# GPIO Pin Configuration
-LIGHT_RELAY = 4        # GPIO pin for light control
-HEAT_RELAY = 17        # GPIO pin for heat control
-DISPLAY_RESET = 21     # GPIO pin for display reset
+# GPIO Pins
+LIGHT_RELAY = 17
+HEAT_RELAY = 4
+DISPLAY_RESET = 21
 
-# I2C Settings
-DISPLAY_ADDRESS = 0x3C # SSH1106 display address
+# Temperature Settings
+MIN_TEMP = 15.0
+DAY_TEMP = 30.0
+TEMP_TOLERANCE = 1.0
 
-# UV Thresholds (μW/cm²)
+# Time Settings
+LIGHT_ON_TIME = "07:30"
+LIGHT_OFF_TIME = "19:30"
+
+# UV Thresholds # μW/cm²
 UVA_THRESHOLDS = {
-    'low': 100,
-    'high': 300
+    'low': 50.0,
+    'high': 100.0
 }
 
 UVB_THRESHOLDS = {
-    'low': 20,
-    'high': 50
+    'low': 2.0,
+    'high': 5.0
 }
+
+# UV View Factor Correction
+SENSOR_HEIGHT = 0.2
+LAMP_DIST_FROM_BACK = 0.3
+ENCLOSURE_HEIGHT = 0.5
+SENSOR_ANGLE = 90
 ```
 
 ## GPIO Wiring
