@@ -122,7 +122,7 @@ def get_logs():
     return jsonify(read_logs(hours))
 
 def main():
-    app.run(host='0.0.0.0', port=8080)
+    app.run(host='0.0.0.0', port=80)
 
 if __name__ == '__main__':
     main()
