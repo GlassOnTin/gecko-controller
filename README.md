@@ -91,7 +91,7 @@ A Raspberry Pi-based temperature, light, and UV controller for gecko vivarium mo
 
 ## Web Interface
 
-The web interface is accessible at `http://<raspberry-pi-ip>:8080` and provides:
+The web interface is accessible at `http://<raspberry-pi-ip>/` and provides:
 
 - Real-time monitoring dashboard
   - Current temperature and humidity
