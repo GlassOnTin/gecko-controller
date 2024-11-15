@@ -13,7 +13,9 @@ override_dh_auto_install:
 	mkdir -p debian/gecko-controller/etc/gecko-controller
 	mkdir -p debian/gecko-controller/lib/systemd/system
 	install -m 755 debian/gecko-controller.sh debian/gecko-controller/usr/bin/gecko-controller
+	install -m 755 debian/gecko-web.sh debian/gecko-controller/usr/bin/gecko-web
 	install -m 644 debian/gecko-controller.service debian/gecko-controller/lib/systemd/system/
+	install -m 644 debian/gecko-web.service debian/gecko-controller/lib/systemd/system/
 	install -m 644 debian/config.py debian/gecko-controller/etc/gecko-controller/
 
 override_dh_auto_test:

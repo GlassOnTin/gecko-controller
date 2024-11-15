@@ -13,10 +13,15 @@ Depends: ${python3:Depends},
          ${misc:Depends},
          python3-pip,
          python3-venv,
-         i2c-tools,
-         python3 (>= 3.9)
-Description: Raspberry Pi Gecko Enclosure Controller
- Automated temperature and light controller for gecko enclosure
- with OLED status display. Monitors temperature and humidity,
- controls lighting cycles, manages heating, and displays status
- on an OLED screen.
+         python3 (>= 3.9),
+         python3-rpi.gpio,
+         python3-pillow,
+         python3-smbus,
+         python3-flask,
+         i2c-tools
+Description: Raspberry Pi Gecko Vivarium Controller
+ Automated environmental controller for gecko vivarium with OLED status
+ display. Monitors temperature and humidity, controls day/night lighting
+ cycles, manages heating, and provides both OLED display and web interface
+ for status monitoring and configuration. Includes UV monitoring for
+ optimal basking conditions.

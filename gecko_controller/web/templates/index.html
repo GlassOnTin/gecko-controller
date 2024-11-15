@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gecko Controller</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.7.0/chart.min.js"></script>
+    <style>
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        .card {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+        }
+        h1, h2 {
+            color: #333;
+        }
+        label {
+            display: block;
+            margin: 10px 0 5px;
+            color: #666;
+        }
+        input {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        button {
+            background: #4CAF50;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-top: 10px;
+        }
+        button:hover {
+            background: #45a049;
+        }
+        .chart-container {
+            position: relative;
+            height: 300px;
+            width: 100%;
+        }
+        .status {
+            padding: 10px;
+            margin-top: 10px;
+            border-radius: 4px;
+            display: none;
+        }
+        .success {
+            background: #d4edda;
+            color: #155724;
+        }
+        .error {
+            background: #f8d7da;
+            color: #721c24;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Gecko Controller</h1>
+        
+        <div class="grid">
+            <div class="card">
+                <h2>Temperature & Humidity</h2>
+                <div class="chart-container">
+                    <canvas id="tempHumidityChart"></canvas>
+                </div>
+            </div>
+            
+            <div class="card">
+                <h2>UV Levels</h2>
+                <div class="chart-container">
+                    <canvas id="uvChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>Settings</h2>
+            <form id="configForm">
+                <div class="grid">
+                    <div>
+                        <h3>Temperature</h3>
+                        <label for="MIN_TEMP">Minimum Temperature (°C)</label>
+                        <input type="number" id="MIN_TEMP" name="MIN_TEMP" step="0.1">
+                        
+                        <label for="DAY_TEMP">Day Temperature (°C)</label>
+                        <input type="number" id="DAY_TEMP" name="DAY_TEMP" step="0.1">
+                        
+                        <label for="TEMP_TOLERANCE">Temperature Tolerance (±°C)</label>
+                        <input type="number" id="TEMP_TOLERANCE" name="TEMP_TOLERANCE" step="0.1">
+                    </div>
+                    
+                    <div>
+                        <h3>Schedule</h3>
+                        <label for="LIGHT_ON_TIME">Light On Time</label>
+                        <input type="time" id="LIGHT_ON_TIME" name="LIGHT_ON_TIME">
+                        
+                        <label for="LIGHT_OFF_TIME">Light Off Time</label>
+                        <input type="time" id="LIGHT_OFF_TIME" name="LIGHT_OFF_TIME">
+                    </div>
+                </div>
+                
+                <button type="submit">Save Changes</button>
+                <div id="status" class="status"></div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        // Initialize charts
+        const tempHumidityChart = new Chart(
+            document.getElementById('tempHumidityChart'),
+            {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [
+                        {
+                            label: 'Temperature (°C)',
+                            borderColor: 'rgb(255, 99, 132)',
+                            yAxisID: 'y',
+                        },
+                        {
+                            label: 'Humidity (%)',
+                            borderColor: 'rgb(54, 162, 235)',
+                            yAxisID: 'y1',
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    interaction: {
+                        mode: 'index',
+                        intersect: false,
+                    },
+                    scales: {
+                        y: {
+                            type: 'linear',
+                            position: 'left',
+                        },
+                        y1: {
+                            type: 'linear',
+                            position: 'right',
+                            grid: {
+                                drawOnChartArea: false,
+                            },
+                        }
+                    }
+                }
+            }
+        );
+
+        const uvChart = new Chart(
+            document.getElementById('uvChart'),
+            {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [
+                        {
+                            label: 'UVA (μW/cm²)',
+                            borderColor: 'rgb(255, 159, 64)',
+                        },
+                        {
+                            label: 'UVB (μW/cm²)',
+                            borderColor: 'rgb(75, 192, 192)',
+                        },
+                        {
+                            label: 'UVC (μW/cm²)',
+                            borderColor: 'rgb(153, 102, 255)',
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                }
+            }
+        );
+
+        // Load and update charts
+        async function updateCharts() {
+            const response = await fetch('/api/logs');
+            const data = await response.json();
+            
+            tempHumidityChart.data.labels = data.timestamps;
+            tempHumidityChart.data.datasets[0].data = data.temperature;
+            tempHumidityChart.data.datasets[1].data = data.humidity;
+            tempHumidityChart.update();
+            
+            uvChart.data.labels = data.timestamps;
+            uvChart.data.datasets[0].data = data.uva;
+            uvChart.data.datasets[1].data = data.uvb;
+            uvChart.data.datasets[2].data = data.uvc;
+            uvChart.update();
+        }
+
+        // Load and update form
+        async function loadConfig() {
+            const response = await fetch('/api/config');
+            const config = await response.json();
+            
+            for (const [key, value] of Object.entries(config)) {
+                const input = document.getElementById(key);
+                if (input) {
+                    input.value = value;
+                }
+            }
+        }
+
+        // Handle form submission
+        document.getElementById('configForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const formData = new FormData(e.target);
+            const config = Object.fromEntries(formData.entries());
+            
+            try {
+                const response = await fetch('/api/config', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(config),
+                });
+                
+                const result = await response.json();
+                const status = document.getElementById('status');
+                
+                if (result.status === 'success') {
+                    status.textContent = 'Settings saved successfully!';
+                    status.className = 'status success';
+                } else {
+                    status.textContent = 'Error saving settings: ' + result.message;
+                    status.className = 'status error';
+                }
+                
+                status.style.display = 'block';
+                setTimeout(() => {
+                    status.style.display = 'none';
+                }, 3000);
+                
+            } catch (error) {
+                console.error('Error:', error);
+            }
+        });
+
+        // Initial load
+        loadConfig();
+        updateCharts();
+        
+        // Update charts every minute
+        setInterval(updateCharts, 60000);
+    </script>
+</body>
+</html>
