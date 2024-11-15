@@ -1,3 +1,9 @@
+gecko-controller (0.4.2) stable; urgency=medium
+
+  * Release 0.4.2
+
+ -- ian <ian@msi-z790>  Fri, 15 Nov 2024 21:14:10 +0000
+
 gecko-controller (0.4.0) stable; urgency=medium
 
   * Added view-factor correction for UV sensor
