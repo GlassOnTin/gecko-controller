@@ -2,20 +2,13 @@ from setuptools import setup, find_packages
 
 setup(
     name="gecko_controller",
-    version="0.2.0",
+    version="0.3.0",
     packages=find_packages(),
     install_requires=[
         "RPi.GPIO",
-        "adafruit-circuitpython-displayio-sh1107",
-        "adafruit-circuitpython-display-text",
-        "adafruit-circuitpython-bitmap-font",
-        "adafruit-blinka",
-        "adafruit-circuitpython-busdevice",
-        "smbus"
+        "smbus2",
+        "Pillow",  # Added for display functionality
     ],
-    package_data={
-        'gecko_controller': ['fonts/*.pcf'],
-    },
     entry_points={
         'console_scripts': [
             'gecko-controller=gecko_controller.controller:main',
@@ -25,4 +18,7 @@ setup(
     author="Ian Ross Williams",
     author_email="ianrosswilliams@gmail.com",
     description="Raspberry Pi-based temperature, light and UV controller for gecko enclosure",
+    long_description="Automated temperature and light controller for gecko enclosure with OLED display support. "
+                     "Features include temperature and humidity monitoring, light cycle control, "
+                     "heat management, and OLED status display.",
 )

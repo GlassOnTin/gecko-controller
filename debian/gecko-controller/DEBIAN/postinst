@@ -1,0 +1,113 @@
+#!/bin/sh
+set -e
+
+VENV_DIR="/opt/gecko-controller/venv"
+LOG_FILE="/var/log/gecko-controller-install.log"
+
+log() {
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" | tee -a "$LOG_FILE"
+}
+
+get_python_version() {
+    "$VENV_DIR/bin/python3" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")'
+}
+
+case "$1" in
+    configure)
+        log "Starting gecko-controller installation on $(uname -n)"
+
+        # Create virtual environment
+        log "Creating virtual environment in $VENV_DIR"
+        python3 -m venv "$VENV_DIR"
+
+        # Get Python version for site-packages path
+        PYTHON_VERSION=$(get_python_version)
+        log "Detected Python version: $PYTHON_VERSION"
+
+        # Upgrade pip and install wheel
+        log "Upgrading pip and installing wheel"
+        "$VENV_DIR/bin/pip" install --upgrade pip wheel setuptools
+
+        # Install required packages
+        log "Installing required packages"
+        "$VENV_DIR/bin/pip" install \
+            'RPi.GPIO' \
+            'smbus2' \
+            'Pillow'
+
+        # Verify installations
+        log "Verifying installations"
+        installed_packages=$("$VENV_DIR/bin/pip" freeze)
+        echo "Installed packages:" | tee -a "$LOG_FILE"
+        echo "$installed_packages" | tee -a "$LOG_FILE"
+
+        # Enable and start the service
+        log "Configuring systemd service"
+        systemctl daemon-reload
+
+        log "Enabling gecko-controller service"
+        systemctl enable gecko-controller
+
+        log "Starting gecko-controller service"
+        systemctl start gecko-controller
+
+        log "Installation completed successfully"
+        ;;
+
+    abort-upgrade|abort-remove|abort-deconfigure)
+        ;;
+esac
+
+# Automatically added by dh_systemd_enable/13.11.4
+if [ "$1" = "configure" ] || [ "$1" = "abort-upgrade" ] || [ "$1" = "abort-deconfigure" ] || [ "$1" = "abort-remove" ] ; then
+	# The following line should be removed in trixie or trixie+1
+	deb-systemd-helper unmask 'gecko-controller.service' >/dev/null || true
+
+	# was-enabled defaults to true, so new installations run enable.
+	if deb-systemd-helper --quiet was-enabled 'gecko-controller.service'; then
+		# Enables the unit on first installation, creates new
+		# symlinks on upgrades if the unit file has changed.
+		deb-systemd-helper enable 'gecko-controller.service' >/dev/null || true
+	else
+		# Update the statefile to add new symlinks (if any), which need to be
+		# cleaned up on purge. Also remove old symlinks.
+		deb-systemd-helper update-state 'gecko-controller.service' >/dev/null || true
+	fi
+fi
+# End automatically added section
+
+# Automatically added by dh_python3
+if command -v py3compile >/dev/null 2>&1; then
+	py3compile -p gecko-controller 
+fi
+if command -v pypy3compile >/dev/null 2>&1; then
+	pypy3compile -p gecko-controller  || true
+fi
+
+# End automatically added section
+# Automatically added by dh_systemd_start/13.11.4
+if [ "$1" = "configure" ] || [ "$1" = "abort-upgrade" ] || [ "$1" = "abort-deconfigure" ] || [ "$1" = "abort-remove" ] ; then
+	if [ -d /run/systemd/system ]; then
+		systemctl --system daemon-reload >/dev/null || true
+		if [ -n "$2" ]; then
+			_dh_action=restart
+		else
+			_dh_action=start
+		fi
+		deb-systemd-invoke $_dh_action 'gecko-controller.service' >/dev/null || true
+	fi
+fi
+# End automatically added section
+# Automatically added by dh_installinit/13.11.4
+if [ "$1" = "configure" ] || [ "$1" = "abort-upgrade" ] || [ "$1" = "abort-deconfigure" ] || [ "$1" = "abort-remove" ] ; then
+	if [ -z "${DPKG_ROOT:-}" ] && [ -x "/etc/init.d/gecko-controller" ]; then
+		update-rc.d gecko-controller defaults >/dev/null
+		if [ -n "$2" ]; then
+			_dh_action=restart
+		else
+			_dh_action=start
+		fi
+		invoke-rc.d gecko-controller $_dh_action || exit 1
+	fi
+fi
+# End automatically added section

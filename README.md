@@ -1,70 +1,137 @@
 # Gecko Controller
 
-A Raspberry Pi-based temperature and light controller for gecko enclosure monitoring and control.
+A Raspberry Pi-based temperature, light, and UV controller for gecko enclosure monitoring and control.
+
+<div align="center">
+  <img src="diablo.jpg" alt="Diablo the Leopard Gecko" width="400"/>
+  <p><em>Diablo the Leopard Gecko, for whom this controller was built</em></p>
+</div>
 
 ## Features
 
-- Real-time temperature and humidity monitoring
-- Automated light cycle control
-- Temperature-based heating control
-- OLED display showing:
+- Real-time temperature and humidity monitoring via SHT31 sensor
+- UV spectrum monitoring (UVA/UVB/UVC) via AS7331 sensor
+- Automated light cycle control with configurable schedules
+- Temperature-based heating control with day/night settings
+- OLED status display showing:
   - Current time
   - Temperature and humidity readings
   - Target temperature
+  - UV levels with status indicators
   - Light and heat status
   - Time until next light transition
 
 ## Hardware Requirements
 
 - Raspberry Pi (any model with GPIO pins)
-- SH1107 OLED Display
+- SSH1106 OLED Display (I2C interface)
 - SHT31 Temperature/Humidity Sensor
 - AS7331 Spectral UV Sensor
-- Relay modules for light and heat control
-- Compatible power supply
+- 2x Relay modules (for light and heat control)
+- Compatible 5V power supply
+- I2C-compatible cables and connectors
 
 ## Installation
 
-1. Install Poetry if you haven't already:
-```bash
-curl -sSL https://install.python-poetry.org | python3 -
-```
+### Method 1: Using the Debian Package (Recommended)
 
-2. Clone the repository and install dependencies:
-```bash
-git clone https://github.com/yourusername/gecko-controller.git
-cd gecko-controller
-poetry install
-```
+1. Enable I2C on your Raspberry Pi:
+   ```bash
+   sudo raspi-config
+   # Navigate to Interface Options > I2C > Enable
+   ```
 
-3. Copy the Fork Awesome font to the fonts directory:
-```bash
-mkdir -p gecko_controller/fonts
-cp forkawesome-12.pcf gecko_controller/fonts/
-```
+2. Install the package:
+   ```bash
+   sudo apt update
+   sudo apt install gecko-controller
+   ```
 
-## Usage
+3. The service will start automatically. Check its status with:
+   ```bash
+   sudo systemctl status gecko-controller
+   ```
 
-Run the controller:
-```bash
-poetry run gecko-controller
-```
+### Method 2: Running from Source
+
+1. Enable I2C as described above
+
+2. Clone the repository:
+   ```bash
+   git clone https://github.com/yourusername/gecko-controller.git
+   cd gecko-controller
+   ```
+
+3. Install required packages:
+   ```bash
+   python3 -m pip install RPi.GPIO smbus2 Pillow
+   ```
+
+4. Run the controller:
+   ```bash
+   python3 gecko_controller/controller.py
+   ```
 
 ## Configuration
 
-The following parameters can be adjusted in `controller.py`:
+Create or modify `/etc/gecko-controller/config.py` with your settings:
 
-- `MIN_TEMP`: Minimum (night) temperature
-- `DAY_TEMP`: Target daytime temperature
-- `TEMP_TOLERANCE`: Temperature control deadband
-- `LIGHT_ON_HOUR`: Hour to turn lights on (24-hour format)
-- `LIGHT_OFF_HOUR`: Hour to turn lights off (24-hour format)
+```python
+# Temperature Settings (°C)
+MIN_TEMP = 20.0        # Night temperature
+DAY_TEMP = 26.0        # Day temperature
+TEMP_TOLERANCE = 0.5   # Temperature control deadband
 
-## GPIO Pin Configuration
+# Schedule (24-hour format)
+LIGHT_ON_HOUR = 8      # Hour to turn lights on
+LIGHT_OFF_HOUR = 20    # Hour to turn lights off
 
-- Light Relay: GPIO 4
-- Heat Relay: GPIO 17
-- Display Reset: GPIO 21
+# GPIO Pin Configuration
+LIGHT_RELAY = 4        # GPIO pin for light control
+HEAT_RELAY = 17        # GPIO pin for heat control
+DISPLAY_RESET = 21     # GPIO pin for display reset
+
+# I2C Settings
+DISPLAY_ADDRESS = 0x3C # SSH1106 display address
+
+# UV Thresholds (μW/cm²)
+UVA_THRESHOLDS = {
+    'low': 100,
+    'high': 300
+}
+
+UVB_THRESHOLDS = {
+    'low': 20,
+    'high': 50
+}
+```
+
+## GPIO Wiring
+
+| Component          | GPIO Pin | Notes                    |
+|-------------------|----------|--------------------------|
+| Light Relay       | GPIO 4   | Active HIGH for ON       |
+| Heat Relay        | GPIO 17  | Active HIGH for ON       |
+| Display Reset     | GPIO 21  | Optional, HIGH for normal|
+| I2C SDA           | GPIO 2   | For all I2C devices      |
+| I2C SCL           | GPIO 3   | For all I2C devices      |
+
+## Troubleshooting
+
+1. Check I2C devices are detected:
+   ```bash
+   sudo i2cdetect -y 1
+   ```
+
+2. View service logs:
+   ```bash
+   journalctl -u gecko-controller -f
+   ```
+
+3. Common issues:
+   - If display shows no data, check I2C connections and addresses
+   - If UV readings show as "None", verify AS7331 sensor connection
+   - For temperature/humidity errors, check SHT31 sensor wiring
 
 ## Contributing
 
@@ -77,3 +144,7 @@ The following parameters can be adjusted in `controller.py`:
 ## License
 
 This project is licensed under the MIT License - see the LICENSE file for details.
+
+## Support
+
+For issues, questions, or contributions, please open an issue on the GitHub repository.

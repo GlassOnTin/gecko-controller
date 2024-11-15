@@ -1,0 +1,16 @@
+[Unit]
+Description=Gecko Enclosure Controller
+After=network.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/opt/gecko-controller
+Environment=PYTHONPATH=/opt/gecko-controller
+ExecStart=/usr/bin/gecko-controller
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

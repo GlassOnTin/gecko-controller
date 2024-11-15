@@ -3,29 +3,9 @@ set -e
 
 VENV_DIR="/opt/gecko-controller/venv"
 LOG_FILE="/var/log/gecko-controller-install.log"
-SWAP_FILE="/tmp/gecko-install-swap"
-SWAP_SIZE="512M"
 
 log() {
     echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" | tee -a "$LOG_FILE"
-}
-
-setup_temporary_swap() {
-    if [ ! -f "$SWAP_FILE" ]; then
-        log "Setting up temporary swap file for smbus build"
-        dd if=/dev/zero of="$SWAP_FILE" bs=1M count=512
-        chmod 600 "$SWAP_FILE"
-        mkswap "$SWAP_FILE"
-        swapon "$SWAP_FILE"
-    fi
-}
-
-cleanup_temporary_swap() {
-    if [ -f "$SWAP_FILE" ]; then
-        log "Cleaning up temporary swap file"
-        swapoff "$SWAP_FILE" || true
-        rm -f "$SWAP_FILE"
-    fi
 }
 
 get_python_version() {
@@ -35,9 +15,6 @@ get_python_version() {
 case "$1" in
     configure)
         log "Starting gecko-controller installation on $(uname -n)"
-
-        # Set up temporary swap if needed
-        setup_temporary_swap
 
         # Create virtual environment
         log "Creating virtual environment in $VENV_DIR"
@@ -51,25 +28,12 @@ case "$1" in
         log "Upgrading pip and installing wheel"
         "$VENV_DIR/bin/pip" install --upgrade pip wheel setuptools
 
-        # Install packages one at a time for better progress visibility
-        log "Installing RPi.GPIO"
-        "$VENV_DIR/bin/pip" install 'RPi.GPIO'
-
-        log "Installing Adafruit packages"
+        # Install required packages
+        log "Installing required packages"
         "$VENV_DIR/bin/pip" install \
-            'adafruit-circuitpython-displayio-sh1107' \
-            'adafruit-circuitpython-display-text' \
-            'adafruit-circuitpython-bitmap-font' \
-            'adafruit-blinka' \
-            'adafruit-circuitpython-busdevice'
-
-        # Install smbus with resource limitations
-        log "Installing smbus (this may take several minutes)"
-        export MAKEFLAGS="-j1"
-        "$VENV_DIR/bin/pip" install --no-cache-dir --no-build-isolation 'smbus'
-
-        # Clean up temporary swap
-        cleanup_temporary_swap
+            'RPi.GPIO' \
+            'smbus2' \
+            'Pillow'
 
         # Verify installations
         log "Verifying installations"
@@ -91,7 +55,6 @@ case "$1" in
         ;;
 
     abort-upgrade|abort-remove|abort-deconfigure)
-        cleanup_temporary_swap
         ;;
 esac
 

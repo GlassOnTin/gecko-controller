@@ -1,0 +1,9 @@
+Metadata-Version: 2.1
+Name: gecko-controller
+Version: 0.3.0
+Summary: Raspberry Pi-based temperature, light and UV controller for gecko enclosure
+Author: Ian Ross Williams
+Author-email: ianrosswilliams@gmail.com
+Requires-Python: >=3.9
+
+Automated temperature and light controller for gecko enclosure with OLED display support. Features include temperature and humidity monitoring, light cycle control, heat management, and OLED status display.
