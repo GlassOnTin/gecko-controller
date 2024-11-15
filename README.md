@@ -1,6 +1,6 @@
 # Gecko Controller
 
-A Raspberry Pi-based temperature, light, and UV controller for gecko enclosure monitoring and control.
+A Raspberry Pi-based temperature, light, and UV controller for gecko vivarium monitoring and control.
 
 <div align="center">
   <img src="diablo.jpg" alt="Diablo the Leopard Gecko" width="400"/>
@@ -20,6 +20,11 @@ A Raspberry Pi-based temperature, light, and UV controller for gecko enclosure m
   - UV levels with status indicators
   - Light and heat status
   - Time until next light transition
+- Web interface for:
+  - Real-time environmental monitoring
+  - Temperature and light schedule configuration
+  - Historical data visualization
+  - Mobile-friendly responsive design
 - Logging of environmental conditions
 
 ## Hardware Requirements
@@ -48,9 +53,15 @@ A Raspberry Pi-based temperature, light, and UV controller for gecko enclosure m
    sudo apt install gecko-controller
    ```
 
-3. The service will start automatically. Check its status with:
+3. The controller service will start automatically. Check its status with:
    ```bash
    sudo systemctl status gecko-controller
+   ```
+
+4. Start and enable the web interface:
+   ```bash
+   sudo systemctl start gecko-web
+   sudo systemctl enable gecko-web
    ```
 
 ### Method 2: Running from Source
@@ -65,13 +76,34 @@ A Raspberry Pi-based temperature, light, and UV controller for gecko enclosure m
 
 3. Install required packages:
    ```bash
-   python3 -m pip install RPi.GPIO smbus2 Pillow
+   python3 -m pip install RPi.GPIO smbus2 Pillow Flask
    ```
 
 4. Run the controller:
    ```bash
    python3 gecko_controller/controller.py
    ```
+
+5. In a separate terminal, run the web interface:
+   ```bash
+   python3 -m gecko_controller.web.app
+   ```
+
+## Web Interface
+
+The web interface is accessible at `http://<raspberry-pi-ip>:8080` and provides:
+
+- Real-time monitoring dashboard
+  - Current temperature and humidity
+  - UV levels with status indicators
+  - Light and heat status
+- Historical data graphs
+  - Temperature and humidity trends
+  - UV exposure levels
+- Configuration panel
+  - Temperature thresholds
+  - Light schedule
+  - UV warning levels
 
 ## Configuration
 
