@@ -15,24 +15,28 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Needed to get all tags for version verification
 
-      - name: Verify version consistency
+      - name: Set up version variables
         run: |
           # Extract version from tag
           TAG_VERSION=$(echo ${{ github.ref_name }} | sed 's/^v//')
+          echo "PACKAGE_VERSION=$TAG_VERSION" >> $GITHUB_ENV
+          
+          # Make scripts executable
+          chmod +x build.sh tools/verify-versions.sh
 
-      - name: Install build dependencies
+      - name: Verify versions match tag
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            devscripts \
-            debhelper \
-            python3-all \
-            dh-python \
-            python3-setuptools
+          # Verify the tag matches our package versions
+          if ! tools/verify-versions.sh; then
+            echo "::error::Version mismatch detected. Package versions must match git tag."
+            exit 1
+          fi
 
       - name: Build package
-        run: dpkg-buildpackage -us -uc
+        run: ./build.sh
 
       - name: Create Release
         id: create_release

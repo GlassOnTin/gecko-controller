@@ -1,2 +1,0 @@
-[console_scripts]
-gecko-controller = gecko_controller.controller:main

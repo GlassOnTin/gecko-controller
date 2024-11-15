@@ -1,0 +1,38 @@
+name: Build Check
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Make scripts executable
+        run: |
+          chmod +x build.sh tools/verify-versions.sh
+
+      - name: Verify versions
+        run: tools/verify-versions.sh
+
+      - name: Build package
+        run: ./build.sh
+
+      - name: Move build artifacts to workspace
+        run: |
+          mkdir -p artifacts
+          cp ../gecko-controller_*.deb artifacts/
+          cp ../gecko-controller_*.buildinfo artifacts/
+          cp ../gecko-controller_*.changes artifacts/
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: debian-packages
+          path: artifacts/
+          if-no-files-found: error

@@ -4,6 +4,8 @@ gecko-controller (0.4.0) stable; urgency=medium
   * Added data rotating logging to /var/log/geck-controller/readings.log
   * Time setting now uses "hh:mm" format rather than just hour
 
+ -- Ian Ross Williams <ianrosswilliams@gmail.com>  Wed, 15 Nov 2024 21:00:00 +0000
+
 gecko-controller (0.3.0) stable; urgency=medium
 
   * Changed display to SSH1106
