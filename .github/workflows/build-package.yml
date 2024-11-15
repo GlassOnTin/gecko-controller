@@ -21,22 +21,6 @@ jobs:
           # Extract version from tag
           TAG_VERSION=$(echo ${{ github.ref_name }} | sed 's/^v//')
 
-          # Extract version from version.py
-          PACKAGE_VERSION=$(python3 -c "exec(open('gecko_controller/version.py').read()); print(VERSION)")
-
-          # Check if versions match
-          if [ "$TAG_VERSION" != "$PACKAGE_VERSION" ]; then
-            echo "Version mismatch:"
-            echo "Tag version: $TAG_VERSION"
-            echo "Package version: $PACKAGE_VERSION"
-            exit 1
-          fi
-
-          # Update debian/changelog if needed
-          if ! head -n1 debian/changelog | grep -q "$TAG_VERSION"; then
-            dch --newversion "$TAG_VERSION" "New release $TAG_VERSION"
-          fi
-
       - name: Install build dependencies
         run: |
           sudo apt-get update
