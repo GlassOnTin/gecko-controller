@@ -1,16 +1,24 @@
 #!/bin/bash
-# build.sh - For building packages
 set -e
 
-# Ensure we have the necessary tools
+echo "Starting build process..."
+
+echo "Checking for required tools..."
 sudo apt-get update
 sudo apt-get install -y debhelper dh-python python3-all python3-setuptools python3-pip devscripts
 
-# Verify version consistency before building
-./tools/verify-versions.sh
+echo "Verifying versions..."
+if ! ./tools/verify-versions.sh; then
+    echo "Error: Version verification failed"
+    exit 1
+fi
 
-# Build the package
-dpkg-buildpackage -us -uc
+echo "Building Debian package..."
+if ! dpkg-buildpackage -us -uc; then
+    echo "Error: Package build failed"
+    exit 1
+fi
 
-# The .deb file will be created in the parent directory
-echo "Package built successfully! You can find the .deb file in the parent directory."
+echo "Build completed successfully!"
+echo "Package files created in parent directory:"
+ls -l ../*.deb ../*.buildinfo ../*.changes
