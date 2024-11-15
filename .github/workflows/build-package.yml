@@ -1,0 +1,90 @@
+name: Build and Release Debian Package
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'  # Run on version tags
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify version consistency
+        run: |
+          # Extract version from tag
+          TAG_VERSION=$(echo ${{ github.ref_name }} | sed 's/^v//')
+
+          # Extract version from version.py
+          PACKAGE_VERSION=$(python3 -c "exec(open('gecko_controller/version.py').read()); print(VERSION)")
+
+          # Check if versions match
+          if [ "$TAG_VERSION" != "$PACKAGE_VERSION" ]; then
+            echo "Version mismatch:"
+            echo "Tag version: $TAG_VERSION"
+            echo "Package version: $PACKAGE_VERSION"
+            exit 1
+          fi
+
+          # Update debian/changelog if needed
+          if ! head -n1 debian/changelog | grep -q "$TAG_VERSION"; then
+            dch --newversion "$TAG_VERSION" "New release $TAG_VERSION"
+          fi
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            devscripts \
+            debhelper \
+            python3-all \
+            dh-python \
+            python3-setuptools
+
+      - name: Build package
+        run: dpkg-buildpackage -us -uc
+
+      - name: Create Release
+        id: create_release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            ../gecko-controller_*.deb
+            ../gecko-controller_*.buildinfo
+            ../gecko-controller_*.changes
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          body: |
+            Gecko Controller Release ${{ github.ref_name }}
+
+            ## Installation
+            ```bash
+            sudo apt update
+            sudo apt install ./gecko-controller_*.deb
+            ```
+
+            Please ensure I2C is enabled on your Raspberry Pi before installation.
+            For full installation instructions, see the README.md
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Move build artifacts to workspace
+        run: |
+          mkdir -p artifacts
+          cp ../gecko-controller_*.deb artifacts/
+          cp ../gecko-controller_*.buildinfo artifacts/
+          cp ../gecko-controller_*.changes artifacts/
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: debian-packages
+          path: artifacts/
+          if-no-files-found: error
