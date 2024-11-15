@@ -1,3 +1,9 @@
+gecko-controller (0.4.0) stable; urgency=medium
+
+  * Added view-factor correction for UV sensor
+  * Added data rotating logging to /var/log/geck-controller/readings.log
+  * Time setting now uses "hh:mm" format rather than just hour
+
 gecko-controller (0.3.0) stable; urgency=medium
 
   * Changed display to SSH1106

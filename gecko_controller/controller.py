@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
 import os
 import time
+import math
 import smbus2
 import RPi.GPIO as GPIO
-from datetime import datetime, timedelta
+import logging
+import logging.handlers
+from datetime import datetime, timedelta, time as datetime_time
 from PIL import Image, ImageDraw, ImageFont
 import pathlib
 from typing import Tuple, Optional
+from pathlib import Path
 
 # Import config
 try:
@@ -21,6 +25,12 @@ except ImportError:
         print("The file should be at: /etc/gecko-controller/config.py")
         print("Try reinstalling the package with: sudo apt install --reinstall gecko-controller")
         sys.exit(1)
+
+# Constants for logging
+LOG_DIR = "/var/log/gecko-controller"
+MAX_LOG_SIZE = 10 * 1024 * 1024  # 10MB per file
+LOG_BACKUP_COUNT = 5  # Keep 5 rotated files
+LOG_INTERVAL = 60  # seconds
 
 # Get the directory where the module is installed
 MODULE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -112,6 +122,16 @@ class SSH1106Display:
 
 class GeckoController:
     def __init__(self):
+        # Convert time settings from config to datetime.time objects
+        self.light_on_time = self.parse_time_setting(LIGHT_ON_TIME)
+        self.light_off_time = self.parse_time_setting(LIGHT_OFF_TIME)
+        print(f"Light on @ {self.light_on_time}, Light off @ {self.light_off_time}\n")
+        
+        # Use thresholds from config
+        self.UVA_THRESHOLDS = UVA_THRESHOLDS
+        self.UVB_THRESHOLDS = UVB_THRESHOLDS
+        print(f"UVA Thresholds = {self.UVA_THRESHOLDS}, UVB Thresholds = {self.UVB_THRESHOLDS}\n")
+ 
         # GPIO Setup
         GPIO.setmode(GPIO.BCM)
         GPIO.setup(LIGHT_RELAY, GPIO.OUT)
@@ -122,6 +142,8 @@ class GeckoController:
             GPIO.output(DISPLAY_RESET, GPIO.HIGH)  # Start with reset inactive
 
         self.setup_display()
+        self.setup_logging()
+        self.last_log_time = 0
         self.bus = smbus2.SMBus(1)
         
         # UV sensor configuration with fallback paths
@@ -150,6 +172,12 @@ class GeckoController:
             self.uv_sensor.integration_time = INTEGRATION_TIME_256MS
             self.uv_sensor.gain = GAIN_16X
 
+        # Calculate UV correction factor
+        self.uv_correction_factor = self.calculate_uv_correction()
+        print(f"\nUV Correction Factor: {self.uv_correction_factor:.3f}")
+        print(f"Sensor Position: {SENSOR_HEIGHT}m height, {LAMP_DIST_FROM_BACK}m from back")
+        print(f"Lamp Height: {ENCLOSURE_HEIGHT}m, Sensor Angle: {SENSOR_ANGLE}°\n")
+
         # Create an image buffer
         self.image = Image.new('1', (128, 64), 255)  # 255 = white background
         self.draw = ImageDraw.Draw(self.image)
@@ -176,9 +204,44 @@ class GeckoController:
         self.ICON_TOO_HIGH = "⚠"    
         self.ICON_ERROR = "?"
 
-        # Use thresholds from config
-        self.UVA_THRESHOLDS = UVA_THRESHOLDS
-        self.UVB_THRESHOLDS = UVB_THRESHOLDS
+    @staticmethod
+    def parse_time_setting(time_str: str) -> datetime_time:
+        """Parse time string in HH:MM format into time object"""
+        try:
+            if ':' in time_str:
+                hours, minutes = map(int, time_str.split(':'))
+            else:
+                # Backward compatibility for hour-only settings
+                hours = int(time_str)
+                minutes = 0
+            return datetime_time(hours, minutes)
+        except (ValueError, TypeError) as e:
+            print(f"Error parsing time setting {time_str}: {e}")
+            # Default to midnight if invalid
+            return datetime_time(0, 0)
+            
+    def setup_logging(self):
+        """Configure logging with rotation"""
+        os.makedirs(LOG_DIR, exist_ok=True)
+        log_file = Path(LOG_DIR) / "readings.log"
+        
+        # Configure main logger
+        self.logger = logging.getLogger("gecko_controller")
+        self.logger.setLevel(logging.INFO)
+        
+        # Create rotating file handler
+        handler = logging.handlers.RotatingFileHandler(
+            log_file,
+            maxBytes=MAX_LOG_SIZE,
+            backupCount=LOG_BACKUP_COUNT
+        )
+        
+        # Create formatter
+        formatter = logging.Formatter(
+            '%(asctime)s,%(temp).1f,%(humidity).1f,%(uva).4f,%(uvb).4f,%(uvc).4f,%(light)d,%(heat)d'
+        )
+        handler.setFormatter(formatter)
+        self.logger.addHandler(handler)
 
     def setup_display(self):
         """Initialize the display"""
@@ -187,17 +250,31 @@ class GeckoController:
     def get_next_transition(self) -> Tuple[str, datetime]:
         """Calculate time until next light state change"""
         now = datetime.now()
-        current_hour = now.hour
-
-        if LIGHT_ON_HOUR <= current_hour < LIGHT_OFF_HOUR:
+        current_time = now.time()
+        
+        # Create datetime objects for today's on/off times
+        today_on = now.replace(
+            hour=self.light_on_time.hour,
+            minute=self.light_on_time.minute,
+            second=0,
+            microsecond=0
+        )
+        today_off = now.replace(
+            hour=self.light_off_time.hour,
+            minute=self.light_off_time.minute,
+            second=0,
+            microsecond=0
+        )
+        
+        if self.light_on_time <= current_time < self.light_off_time:
             # Lights are on, calculate time until off
-            next_time = now.replace(hour=LIGHT_OFF_HOUR, minute=0, second=0)
+            next_time = today_off
             if next_time < now:
                 next_time += timedelta(days=1)
             return "→OFF", next_time
         else:
             # Lights are off, calculate time until on
-            next_time = now.replace(hour=LIGHT_ON_HOUR, minute=0, second=0)
+            next_time = today_on
             if next_time < now:
                 next_time += timedelta(days=1)
             return "→ON", next_time
@@ -210,10 +287,30 @@ class GeckoController:
         minutes = int((diff.total_seconds() % 3600) // 60)
         return f"{hours}h{minutes:02d}m"
 
-    def get_target_temp(self) -> float:
-        """Get the current target temperature based on time of day"""
-        current_hour = datetime.now().hour
-        return DAY_TEMP if LIGHT_ON_HOUR <= current_hour < LIGHT_OFF_HOUR else MIN_TEMP
+    def calculate_uv_correction(self):
+        """Calculate UV correction factor based on geometry"""       
+        # Calculate distances and angles
+        sensor_to_lamp_horiz = LAMP_DIST_FROM_BACK  # horizontal distance from sensor to lamp
+        sensor_to_lamp_vert = ENCLOSURE_HEIGHT - SENSOR_HEIGHT  # vertical distance
+        
+        # Direct distance from sensor to lamp
+        direct_distance = math.sqrt(sensor_to_lamp_horiz**2 + sensor_to_lamp_vert**2)
+        
+        # Angle between sensor normal and lamp
+        lamp_angle = math.degrees(math.atan2(sensor_to_lamp_vert, sensor_to_lamp_horiz))
+        effective_angle = abs(lamp_angle - SENSOR_ANGLE)
+        
+        # Cosine correction for sensor angle
+        cosine_factor = math.cos(math.radians(effective_angle))
+        
+        # Inverse square law correction for distance
+        # Normalize to a reference height of 30cm (typical basking height)
+        distance_factor = (0.3 / direct_distance)**2
+        
+        # Combined correction factor
+        correction_factor = 1 / (cosine_factor * distance_factor)
+        
+        return correction_factor
 
     def get_uv_status_icon(self, value: Optional[float], is_uvb: bool = False) -> str:
         """Get status icon for UV readings"""
@@ -282,6 +379,24 @@ class GeckoController:
         # Update the display
         self.display.show_image(self.image)
 
+    def log_readings(self, temp, humidity, uva, uvb, uvc, light_status, heat_status):
+        """Log readings if enough time has passed"""
+        current_time = time.time()
+        if current_time - self.last_log_time >= LOG_INTERVAL:
+            self.logger.info(
+                "",
+                extra={
+                    'temp': temp if temp is not None else -999,
+                    'humidity': humidity if humidity is not None else -999,
+                    'uva': uva if uva is not None else -999,
+                    'uvb': uvb if uvb is not None else -999,
+                    'uvc': uvc if uvc is not None else -999,
+                    'light': 1 if light_status else 0,
+                    'heat': 1 if heat_status else 0
+                }
+            )
+            self.last_log_time = current_time
+
     def read_sensor(self) -> Tuple[Optional[float], Optional[float]]:
         """Read temperature and humidity from the sensor"""
         try:
@@ -299,23 +414,37 @@ class GeckoController:
             return None, None
 
     def read_uv(self) -> Tuple[Optional[float], Optional[float], Optional[float]]:
-        """Read UV values from the sensor"""
+        """Read UV values from the sensor and apply geometric correction"""
         try:
             if self.uv_sensor is None:
                 return None, None, None
             uva, uvb, uvc, temp = self.uv_sensor.values
+            
+            # Apply correction factor
+            if uva is not None:
+                uva = uva * self.uv_correction_factor
+            if uvb is not None:
+                uvb = uvb * self.uv_correction_factor
+            if uvc is not None:
+                uvc = uvc * self.uv_correction_factor
+            
             return uva, uvb, uvc
         except Exception as e:
             print(f"UV sensor read error: {e}")
             return None, None, None
 
+    def get_target_temp(self) -> float:
+        """Get the current target temperature based on time of day"""
+        current_time = datetime.now().time()
+        return DAY_TEMP if self.light_on_time <= current_time < self.light_off_time else MIN_TEMP
+
     def control_light(self) -> bool:
         """Control the light relay based on time"""
-        current_hour = datetime.now().hour
-        should_be_on = LIGHT_ON_HOUR <= current_hour < LIGHT_OFF_HOUR
+        current_time = datetime.now().time()
+        should_be_on = self.light_on_time <= current_time < self.light_off_time
         GPIO.output(LIGHT_RELAY, GPIO.HIGH if should_be_on else GPIO.LOW)
         return should_be_on
-
+ 
     def control_heat(self, current_temp: Optional[float]) -> bool:
         """Control the heat relay based on temperature"""
         if current_temp is None:
@@ -349,6 +478,8 @@ class GeckoController:
                     heat_status = self.control_heat(temp)
                     self.update_display(temp, humidity, uva, uvb, uvc,
                                       light_status, heat_status)
+                    self.log_readings(temp, humidity, uva, uvb, uvc,
+                                    light_status, heat_status)
                 time.sleep(2)
 
         except KeyboardInterrupt:
