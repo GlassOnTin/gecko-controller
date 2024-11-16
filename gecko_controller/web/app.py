@@ -33,7 +33,7 @@ def read_config():
     return config
 
 def write_config(config):
-    """Write config back to file"""
+    """Write config back to file while preserving comments, structure, and UV limit headings"""
     # Read existing file to preserve comments and structure
     with open(CONFIG_FILE, 'r') as f:
         lines = f.readlines()
@@ -41,20 +41,34 @@ def write_config(config):
     # Update values while preserving structure
     new_lines = []
     for line in lines:
-        if '=' in line and not line.strip().startswith('#'):
+        # Preserve empty lines and comments
+        if not line.strip() or line.strip().startswith('#'):
+            new_lines.append(line)
+            continue
+            
+        # Handle normal key-value pairs
+        if '=' in line:
             key = line.split('=')[0].strip()
             if key in config:
                 value = config[key]
+                # Special handling for string values
                 if isinstance(value, str) and not key.endswith('_THRESHOLDS'):
                     value = f'"{value}"'
+                # Special handling for lists/tuples (like thresholds)
+                elif isinstance(value, (list, tuple)):
+                    value = str(value)
                 new_lines.append(f'{key} = {value}\n')
+            else:
+                # If key not in new config, preserve original line
+                new_lines.append(line)
         else:
+            # Preserve any other lines (like section headers)
             new_lines.append(line)
 
     # Write back to file
     with open(CONFIG_FILE, 'w') as f:
         f.writelines(new_lines)
-
+        
 def read_logs(hours=24):
     """Read the last N hours of log data"""
     data = {

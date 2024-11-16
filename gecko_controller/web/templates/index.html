@@ -180,24 +180,55 @@
                     labels: [],
                     datasets: [
                         {
-                            label: 'UVA (μW/cm²)',
+                            label: 'UVA (mW/cm²)',
                             borderColor: 'rgb(255, 159, 64)',
+                            yAxisID: 'y',
                         },
                         {
                             label: 'UVB (μW/cm²)',
                             borderColor: 'rgb(75, 192, 192)',
+                            yAxisID: 'y1',
                         },
                         {
                             label: 'UVC (μW/cm²)',
                             borderColor: 'rgb(153, 102, 255)',
+                            yAxisID: 'y1',
                         }
                     ]
                 },
                 options: {
                     responsive: true,
+                    interaction: {
+                        mode: 'index',
+                        intersect: false,
+                    },
+                    scales: {
+                        y: {
+                            type: 'linear',
+                            position: 'left',
+                            title: {
+                                display: true,
+                                text: 'UVA (mW/cm²)'
+                            },
+                            beginAtZero: true,
+                        },
+                        y1: {
+                            type: 'linear',
+                            position: 'right',
+                            title: {
+                                display: true,
+                                text: 'UVB/UVC (μW/cm²)'
+                            },
+                            beginAtZero: true,
+                            grid: {
+                                drawOnChartArea: false, // only want the grid lines for the left axis
+                            },
+                        }
+                    }
                 }
             }
         );
+        
 
         // Load and update charts
         async function updateCharts() {
