@@ -22,6 +22,22 @@ LOG_INTERVAL = 60  # seconds
 # Get the directory where the module is installed
 MODULE_DIR = os.path.dirname(os.path.abspath(__file__))
 
+# Import config
+try:
+    from gecko_controller.config import *
+except ImportError:
+    try:
+        import sys
+        sys.path.append('/etc/gecko-controller')
+        from config import *
+    except ImportError:
+        print("Error: Could not find configuration file")
+        print("The file should be at: /etc/gecko-controller/config.py")
+        print("Try reinstalling the package with: sudo apt install --reinstall gecko-controller")
+       
+        sys.exit(1)
+
+
 # Font loading helper
 def load_font(name: str, size: int) -> ImageFont.FreeTypeFont:
     """Load a font, falling back to default if not found"""
