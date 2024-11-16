@@ -297,18 +297,6 @@ def get_config():
     """Get current configuration"""
     return jsonify(read_config())
 
-@app.route('/api/config', methods=['POST'])
-def update_config():
-    """Update configuration"""
-    try:
-        new_config = request.get_json()
-        write_config(new_config)
-        # Restart the gecko-controller service to apply changes
-        os.system('systemctl restart gecko-controller')
-        return jsonify({'status': 'success'})
-    except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 400
-
 @app.route('/api/logs')
 def get_logs():
     """Get log data"""
