@@ -12,19 +12,6 @@ import pathlib
 from typing import Tuple, Optional
 from pathlib import Path
 
-# Import config
-try:
-    from gecko_controller.config import *
-except ImportError:
-    try:
-        import sys
-        sys.path.append('/etc/gecko-controller')
-        from config import *
-    except ImportError:
-        print("Error: Could not find configuration file")
-        print("The file should be at: /etc/gecko-controller/config.py")
-        print("Try reinstalling the package with: sudo apt install --reinstall gecko-controller")
-        sys.exit(1)
 
 # Constants for logging
 LOG_DIR = "/var/log/gecko-controller"

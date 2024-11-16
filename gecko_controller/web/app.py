@@ -6,68 +6,248 @@ import re
 import csv
 from datetime import datetime
 import pkg_resources
+import shutil
+import importlib.util
+import sys
+from typing import Dict, Any, Tuple
+import time
 
 app = Flask(__name__)
 app.template_folder = pkg_resources.resource_filename('gecko_controller.web', 'templates')
 
 CONFIG_FILE = '/etc/gecko-controller/config.py'
-LOG_FILE = '/var/log/gecko-controller/readings.log'
+BACKUP_FILE = '/etc/gecko-controller/config.py.bak'
 
-def read_config():
-    """Read and parse the config file"""
-    config = {}
-    with open(CONFIG_FILE, 'r') as f:
-        content = f.read()
-        # Extract key-value pairs using regex
-        pairs = re.findall(r'(\w+)\s*=\s*([^#\n]+)', content)
-        for key, value in pairs:
-            # Clean up the value
-            value = value.strip().strip('"\'')
-            try:
-                # Try to evaluate as Python literal
-                import ast
-                config[key] = ast.literal_eval(value)
-            except:
-                # If not a literal, store as string
-                config[key] = value
-    return config
+# Define all required fields and their types
+REQUIRED_CONFIG = {
+    # Display I2C
+    'DISPLAY_ADDRESS': ('int', lambda x: 0 <= x <= 127),  # Valid I2C address range
+    
+    # GPIO Pins
+    'LIGHT_RELAY': ('int', lambda x: 0 <= x <= 27),  # Valid GPIO range for RPi
+    'HEAT_RELAY': ('int', lambda x: 0 <= x <= 27),
+    'DISPLAY_RESET': ('int', lambda x: 0 <= x <= 27),
+    
+    # Temperature Settings
+    'MIN_TEMP': ('float', lambda x: 10.0 <= x <= 40.0),  # Reasonable temp range
+    'DAY_TEMP': ('float', lambda x: 15.0 <= x <= 40.0),
+    'TEMP_TOLERANCE': ('float', lambda x: 0.1 <= x <= 5.0),
+    
+    # Time Settings
+    'LIGHT_ON_TIME': ('time_str', lambda x: bool(re.match(r'^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$', x))),
+    'LIGHT_OFF_TIME': ('time_str', lambda x: bool(re.match(r'^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$', x))),
+    
+    # UV Thresholds
+    'UVA_THRESHOLDS': ('dict', lambda x: isinstance(x, dict) and 
+                       all(k in x for k in ['low', 'high']) and 
+                       all(isinstance(v, (int, float)) for v in x.values()) and 
+                       0 <= x['low'] <= x['high'] <= 1000),
+    'UVB_THRESHOLDS': ('dict', lambda x: isinstance(x, dict) and 
+                       all(k in x for k in ['low', 'high']) and 
+                       all(isinstance(v, (int, float)) for v in x.values()) and 
+                       0 <= x['low'] <= x['high'] <= 100),
+    
+    # UV View Factor Correction
+    'SENSOR_HEIGHT': ('float', lambda x: 0.0 <= x <= 1.0),
+    'LAMP_DIST_FROM_BACK': ('float', lambda x: 0.0 <= x <= 1.0),
+    'ENCLOSURE_HEIGHT': ('float', lambda x: 0.0 <= x <= 2.0),
+    'SENSOR_ANGLE': ('float', lambda x: 0 <= x <= 360)
+}
 
-def write_config(config):
-    """Write config back to file while preserving comments, structure, and UV limit headings"""
-    # Read existing file to preserve comments and structure
-    with open(CONFIG_FILE, 'r') as f:
-        lines = f.readlines()
+class ConfigValidationError(Exception):
+    """Custom exception for config validation failures"""
+    pass
 
-    # Update values while preserving structure
-    new_lines = []
-    for line in lines:
-        # Preserve empty lines and comments
-        if not line.strip() or line.strip().startswith('#'):
-            new_lines.append(line)
-            continue
+def validate_config_module(module) -> bool:
+    """Validate that all required fields are present and of correct type"""
+    for field, (expected_type, validator) in REQUIRED_CONFIG.items():
+        if not hasattr(module, field):
+            raise ConfigValidationError(f"Missing required field: {field}")
             
-        # Handle normal key-value pairs
-        if '=' in line:
-            key = line.split('=')[0].strip()
-            if key in config:
-                value = config[key]
-                # Special handling for string values
-                if isinstance(value, str) and not key.endswith('_THRESHOLDS'):
-                    value = f'"{value}"'
-                # Special handling for lists/tuples (like thresholds)
-                elif isinstance(value, (list, tuple)):
-                    value = str(value)
-                new_lines.append(f'{key} = {value}\n')
-            else:
-                # If key not in new config, preserve original line
-                new_lines.append(line)
-        else:
-            # Preserve any other lines (like section headers)
-            new_lines.append(line)
+        value = getattr(module, field)
+        
+        # Type validation
+        if expected_type == 'int':
+            if not isinstance(value, int):
+                raise ConfigValidationError(f"Field {field} must be an integer")
+        elif expected_type == 'float':
+            if not isinstance(value, (int, float)):
+                raise ConfigValidationError(f"Field {field} must be a number")
+            value = float(value)
+        elif expected_type == 'time_str':
+            if not isinstance(value, str):
+                raise ConfigValidationError(f"Field {field} must be a time string (HH:MM)")
+        elif expected_type == 'dict':
+            if not isinstance(value, dict):
+                raise ConfigValidationError(f"Field {field} must be a dictionary")
+                
+        # Value validation
+        if not validator(value):
+            raise ConfigValidationError(f"Invalid value for {field}: {value}")
+            
+    # Additional validation: ensure DAY_TEMP > MIN_TEMP
+    if module.DAY_TEMP <= module.MIN_TEMP:
+        raise ConfigValidationError("DAY_TEMP must be greater than MIN_TEMP")
+            
+    return True
 
-    # Write back to file
-    with open(CONFIG_FILE, 'w') as f:
-        f.writelines(new_lines)
+def create_config_content(config: Dict[str, Any]) -> str:
+    """Generate config file content with comments"""
+    lines = [
+        "# Gecko Controller Configuration File",
+        "# This file will be installed to /etc/gecko-controller/config.py",
+        "# You can modify these values to customize your gecko enclosure settings",
+        "# The service must be restarted after changes: sudo systemctl restart gecko-controller",
+        "",
+        "# Display I2C",
+        f"DISPLAY_ADDRESS = {config['DISPLAY_ADDRESS']}",
+        "",
+        "# GPIO Pins",
+        f"LIGHT_RELAY = {config['LIGHT_RELAY']}",
+        f"HEAT_RELAY = {config['HEAT_RELAY']}",
+        f"DISPLAY_RESET = {config['DISPLAY_RESET']}",
+        "",
+        "# Temperature Settings",
+        f"MIN_TEMP = {config['MIN_TEMP']}",
+        f"DAY_TEMP = {config['DAY_TEMP']}",
+        f"TEMP_TOLERANCE = {config['TEMP_TOLERANCE']}",
+        "",
+        "# Time Settings",
+        f'LIGHT_ON_TIME = "{config["LIGHT_ON_TIME"]}"',
+        f'LIGHT_OFF_TIME = "{config["LIGHT_OFF_TIME"]}"',
+        "",
+        "# UV Thresholds # μW/cm²",
+        f"UVA_THRESHOLDS = {config['UVA_THRESHOLDS']}",
+        f"UVB_THRESHOLDS = {config['UVB_THRESHOLDS']}",
+        "",
+        "# UV View Factor Correction",
+        f"SENSOR_HEIGHT = {config['SENSOR_HEIGHT']}",
+        f"LAMP_DIST_FROM_BACK = {config['LAMP_DIST_FROM_BACK']}",
+        f"ENCLOSURE_HEIGHT = {config['ENCLOSURE_HEIGHT']}",
+        f"SENSOR_ANGLE = {config['SENSOR_ANGLE']}"
+    ]
+    return "\n".join(lines)
+
+def load_config_module(config_path: str) -> Tuple[Any, bool]:
+    """Load and validate a Python config module"""
+    try:
+        spec = importlib.util.spec_from_file_location("config", config_path)
+        if spec is None or spec.loader is None:
+            return None, False
+            
+        module = importlib.util.module_from_spec(spec)
+        sys.modules["config"] = module  # This ensures proper importing
+        spec.loader.exec_module(module)
+        
+        # Validate the loaded config
+        validate_config_module(module)
+        return module, True
+    except Exception as e:
+        print(f"Error loading config from {config_path}: {str(e)}")
+        return None, False
+
+def create_backup() -> bool:
+    """Create a backup of the current config file"""
+    try:
+        shutil.copy2(CONFIG_FILE, BACKUP_FILE)
+        return True
+    except Exception as e:
+        print(f"Failed to create backup: {str(e)}")
+        return False
+
+def restore_backup() -> bool:
+    """Restore config from backup file"""
+    try:
+        if os.path.exists(BACKUP_FILE):
+            shutil.copy2(BACKUP_FILE, CONFIG_FILE)
+            return True
+        return False
+    except Exception as e:
+        print(f"Failed to restore backup: {str(e)}")
+        return False
+
+def write_config(config: Dict[str, Any]) -> bool:
+    """Write config back to file with backup and validation"""
+    # Create backup first
+    if not create_backup():
+        raise ConfigValidationError("Failed to create backup, aborting config update")
+
+    try:
+        # Generate the new config file content
+        content = create_config_content(config)
+        
+        # Write the new config file
+        with open(CONFIG_FILE, 'w') as f:
+            f.write(content)
+            
+        # Validate the new config
+        module, success = load_config_module(CONFIG_FILE)
+        if not success:
+            raise ConfigValidationError("New config file failed validation")
+            
+        return True
+        
+    except Exception as e:
+        # Restore backup if anything goes wrong
+        restore_backup()
+        raise ConfigValidationError(f"Failed to update config: {str(e)}")
+
+@app.route('/api/config', methods=['POST'])
+def update_config():
+    """Update configuration with validation and rollback"""
+    try:
+        new_config = request.get_json()
+        
+        # Verify all required fields are present
+        missing_fields = [field for field in REQUIRED_CONFIG.keys() if field not in new_config]
+        if missing_fields:
+            return jsonify({
+                'status': 'error',
+                'message': f'Missing required fields: {", ".join(missing_fields)}'
+            }), 400
+        
+        # Write and validate new config
+        if write_config(new_config):
+            # Wait briefly to ensure file is written
+            time.sleep(0.5)
+            # Restart the gecko-controller service to apply changes
+            os.system('systemctl restart gecko-controller')
+            return jsonify({'status': 'success'})
+        else:
+            return jsonify({
+                'status': 'error',
+                'message': 'Failed to update configuration'
+            }), 500
+            
+    except ConfigValidationError as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 400
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': f'Unexpected error: {str(e)}'
+        }), 500
+
+@app.route('/api/config/restore', methods=['POST'])
+def restore_config():
+    """Endpoint to restore config from backup"""
+    try:
+        if restore_backup():
+            time.sleep(0.5)  # Wait briefly to ensure file is restored
+            os.system('systemctl restart gecko-controller')
+            return jsonify({'status': 'success'})
+        return jsonify({
+            'status': 'error',
+            'message': 'No backup file found'
+        }), 404
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+        
         
 def read_logs(hours=24):
     """Read the last N hours of log data"""
