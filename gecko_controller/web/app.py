@@ -321,34 +321,55 @@ def read_logs(hours=24):
     try:
         cutoff_time = datetime.now() - timedelta(hours=hours)
         
+        # Create a list to store full timestamps and data
+        entries = []
+        
         with open(LOG_FILE, 'r') as f:
             reader = csv.reader(f)
             for row in reader:
                 try:
-                    timestamp = datetime.strptime(row[0] + "." + row[1], '%Y-%m-%d %H:%M:%S.%f')
-                                        
+                    # Create full timestamp object for proper sorting
+                    timestamp = datetime.strptime(row[0] + " " + row[1], '%Y-%m-%d %H:%M:%S.%f')
+                    
                     # Skip entries older than cutoff
                     if timestamp < cutoff_time:
                         continue
                         
-                    data['timestamps'].append(timestamp.strftime('%H:%M'))  # Changed to hour:minute for cleaner display
-                    data['temperature'].append(float(row[2]))
-                    data['humidity'].append(float(row[3]))
-                    data['uva'].append(float(row[4]))
-                    data['uvb'].append(float(row[5]))
-                    data['uvc'].append(float(row[6]))
-                    data['light'].append(int(row[7]))
-                    data['heat'].append(int(row[8]))
+                    entries.append({
+                        'timestamp': timestamp,
+                        'display_time': timestamp.strftime('%H:%M'),
+                        'temperature': float(row[2]),
+                        'humidity': float(row[3]),
+                        'uva': float(row[4]),
+                        'uvb': float(row[5]),
+                        'uvc': float(row[6]),
+                        'light': int(row[7]),
+                        'heat': int(row[8])
+                    })
+                    
                 except (ValueError, IndexError) as e:
                     print(f"Error parsing log entry: {e}")
                     continue
+                    
+        # Sort entries by timestamp
+        entries.sort(key=lambda x: x['timestamp'])
+        
+        # Fill the data arrays with sorted values
+        for entry in entries:
+            data['timestamps'].append(entry['display_time'])
+            data['temperature'].append(entry['temperature'])
+            data['humidity'].append(entry['humidity'])
+            data['uva'].append(entry['uva'])
+            data['uvb'].append(entry['uvb'])
+            data['uvc'].append(entry['uvc'])
+            data['light'].append(entry['light'])
+            data['heat'].append(entry['heat'])
+            
     except FileNotFoundError:
         print(f"Log file not found: {LOG_FILE}")
-        pass
     except Exception as e:
         print(f"Error reading logs: {e}")
-        pass
-    
+        
     return data
 
 @app.route('/')
@@ -366,8 +387,12 @@ def get_config():
 def get_logs():
     """Get log data"""
     hours = request.args.get('hours', default=24, type=int)
-    print(f"/api/logs?hours={hours}")
-    return jsonify(read_logs(hours))
+    print(f"Received log request for past {hours} hours")
+            
+    data = read_logs(hours)
+    print(f"Returning {len(data['timestamps'])} data points")
+            
+    return jsonify(data)
 
 def main():
     app.run(host='0.0.0.0', port=80)
