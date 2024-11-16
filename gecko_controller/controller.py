@@ -15,6 +15,7 @@ from pathlib import Path
 
 # Constants for logging
 LOG_DIR = "/var/log/gecko-controller"
+LOG_FILE = "readings.csv"
 MAX_LOG_SIZE = 10 * 1024 * 1024  # 10MB per file
 LOG_BACKUP_COUNT = 5  # Keep 5 rotated files
 LOG_INTERVAL = 60  # seconds
@@ -226,7 +227,7 @@ class GeckoController:
     def setup_logging(self):
         """Configure logging with rotation"""
         os.makedirs(LOG_DIR, exist_ok=True)
-        log_file = Path(LOG_DIR) / "readings.log"
+        log_file = Path(LOG_DIR + "/" + LOG_FILE)
         
         # Configure main logger
         self.logger = logging.getLogger("gecko_controller")

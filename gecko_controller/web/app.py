@@ -4,7 +4,7 @@ from flask import Flask, render_template, jsonify, request
 import os
 import re
 import csv
-from datetime import datetime
+from datetime import datetime, timedelta
 import pkg_resources
 import shutil
 import importlib.util
@@ -17,6 +17,7 @@ app.template_folder = pkg_resources.resource_filename('gecko_controller.web', 't
 
 CONFIG_FILE = '/etc/gecko-controller/config.py'
 BACKUP_FILE = '/etc/gecko-controller/config.py.bak'
+LOG_FILE = '/var/log/gecko-controller/readings.csv'
 
 # Define all required fields and their types
 REQUIRED_CONFIG = {
@@ -247,7 +248,62 @@ def restore_config():
             'status': 'error',
             'message': str(e)
         }), 500
+
+def read_config() -> dict:
+    """
+    Read and validate the current configuration file.
+    Returns a dictionary of configuration values or default values if the file cannot be read.
+    """
+    try:
+        # Load and validate the config module
+        module, success = load_config_module(CONFIG_FILE)
         
+        if not success or module is None:
+            raise ConfigValidationError("Failed to load configuration file")
+            
+        # Convert config module attributes to dictionary
+        config = {}
+        for field in REQUIRED_CONFIG.keys():
+            value = getattr(module, field)
+            
+            # Handle special cases for formatting
+            if field == 'DISPLAY_ADDRESS':
+                # Convert integer to hex string format
+                config[field] = f"0x{value:02x}"
+            elif REQUIRED_CONFIG[field][0] == 'time_str':
+                # Ensure time strings are in HH:MM format
+                if isinstance(value, str):
+                    try:
+                        parsed_time = datetime.strptime(value, '%H:%M')
+                        value = parsed_time.strftime('%H:%M')
+                    except ValueError:
+                        raise ConfigValidationError(f"Invalid time format for {field}: {value}")
+                config[field] = value
+            else:
+                config[field] = value
+            
+        return config
+        
+    except Exception as e:
+        print(f"Error reading config: {str(e)}")
+        # Return default values as a fallback
+        return {
+            'DISPLAY_ADDRESS': '0x3c',  # Note: Now returning as hex string
+            'LIGHT_RELAY': 17,
+            'HEAT_RELAY': 18,
+            'DISPLAY_RESET': 27,
+            'MIN_TEMP': 20.0,
+            'DAY_TEMP': 25.0,
+            'TEMP_TOLERANCE': 0.5,
+            'LIGHT_ON_TIME': '08:00',
+            'LIGHT_OFF_TIME': '20:00',
+            'UVA_THRESHOLDS': {'low': 100, 'high': 500},
+            'UVB_THRESHOLDS': {'low': 10, 'high': 50},
+            'SENSOR_HEIGHT': 0.15,
+            'LAMP_DIST_FROM_BACK': 0.1,
+            'ENCLOSURE_HEIGHT': 0.6,
+            'SENSOR_ANGLE': 45
+        }
         
 def read_logs(hours=24):
     """Read the last N hours of log data"""
@@ -263,13 +319,19 @@ def read_logs(hours=24):
     }
     
     try:
+        cutoff_time = datetime.now() - timedelta(hours=hours)
+        
         with open(LOG_FILE, 'r') as f:
             reader = csv.reader(f)
             for row in reader:
                 try:
-                    print(row[0],row[1])
-                    timestamp = datetime.strptime(row[0] + "." + row[1], '%Y-%m-%d %H:%M:%S.%f')
-                    data['timestamps'].append(timestamp.strftime('%Y-%m-%d %H:%M'))
+                    timestamp = datetime.strptime(row[0] + " " + row[1], '%Y-%m-%d %H:%M:%S.%f')
+                                        
+                    # Skip entries older than cutoff
+                    if timestamp < cutoff_time:
+                        continue
+                        
+                    data['timestamps'].append(timestamp.strftime('%H:%M'))  # Changed to hour:minute for cleaner display
                     data['temperature'].append(float(row[2]))
                     data['humidity'].append(float(row[3]))
                     data['uva'].append(float(row[4]))
@@ -278,10 +340,13 @@ def read_logs(hours=24):
                     data['light'].append(int(row[7]))
                     data['heat'].append(int(row[8]))
                 except (ValueError, IndexError) as e:
-                    print(e)
+                    print(f"Error parsing log entry: {e}")
                     continue
     except FileNotFoundError:
-        print(f"{LOG_FILE} not found")
+        print(f"Log file not found: {LOG_FILE}")
+        pass
+    except Exception as e:
+        print(f"Error reading logs: {e}")
         pass
     
     return data
@@ -301,6 +366,7 @@ def get_config():
 def get_logs():
     """Get log data"""
     hours = request.args.get('hours', default=24, type=int)
+    print(f"/api/logs?hours={hours}")
     return jsonify(read_logs(hours))
 
 def main():
