@@ -315,6 +315,7 @@
             const response = await fetch('/api/logs');
             const data = await response.json();
             
+            print(len(data.timestamps), "samples")
             tempHumidityChart.data.labels = data.timestamps;
             tempHumidityChart.data.datasets[0].data = data.temperature;
             tempHumidityChart.data.datasets[1].data = data.humidity;

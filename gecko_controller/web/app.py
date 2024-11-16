@@ -325,7 +325,7 @@ def read_logs(hours=24):
             reader = csv.reader(f)
             for row in reader:
                 try:
-                    timestamp = datetime.strptime(row[0] + " " + row[1], '%Y-%m-%d %H:%M:%S.%f')
+                    timestamp = datetime.strptime(row[0] + "." + row[1], '%Y-%m-%d %H:%M:%S.%f')
                                         
                     # Skip entries older than cutoff
                     if timestamp < cutoff_time:
