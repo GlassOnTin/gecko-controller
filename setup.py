@@ -2,19 +2,21 @@ from setuptools import setup, find_packages
 
 setup(
     name="gecko_controller",
-    version="0.7.6",
+    version="0.7.7",
     packages=find_packages(),
     package_data={
         'gecko_controller': [
             'web/templates/*',
-            'web/static/*'
+            'web/static/*',
+            'as7331.py'
         ]
     },
     install_requires=[
         'smbus2',
         'pillow',
         'RPi.GPIO',
-        'flask'
+        'flask',
+        'adafruit-circuitpython-busdevice'
     ],
     entry_points={
         'console_scripts': [
