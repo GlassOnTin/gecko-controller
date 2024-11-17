@@ -2,12 +2,12 @@ from setuptools import setup, find_packages
 
 setup(
     name="gecko_controller",
-    version="0.6.1",
+    version="0.7.0",
     packages=find_packages(),
     package_data={
         'gecko_controller': [
-            'fonts/*',
-            'web/templates/*'  
+            'web/templates/*',
+            'web/static/*'
         ]
     },
     install_requires=[

@@ -2,12 +2,47 @@
 # tools/bump-version.sh - For updating versions
 set -e
 
-if [ "$#" -ne 1 ]; then
-    echo "Usage: $0 <new-version>"
-    exit 1
-fi
+# Function to extract current version from setup.py
+get_current_version() {
+    if grep -q 'version="' setup.py; then
+        grep 'version="' setup.py | sed 's/.*version="\([^"]*\)".*/\1/'
+    else
+        grep "version='" setup.py | sed "s/.*version='\([^']*\)'.*/\1/"
+    fi
+}
 
-NEW_VERSION="$1"
+# Function to increment patch version
+increment_patch_version() {
+    local version=$1
+    echo "$version" | awk -F. '{$NF = $NF + 1;} 1' | sed 's/ /./g'
+}
+
+# Parse command line options
+COMMIT_MSG=""
+NEW_VERSION=""
+
+while getopts "m:v:h" opt; do
+    case $opt in
+        m)
+            COMMIT_MSG="$OPTARG"
+            ;;
+        v)
+            NEW_VERSION="$OPTARG"
+            ;;
+        h)
+            echo "Usage: $0 [-v version] [-m commit-message]"
+            echo "Options:"
+            echo "  -v version         Specify new version (if omitted, patch version will be incremented)"
+            echo "  -m commit-message  Specify git commit message (default: 'Bump version to <version>')"
+            echo "  -h                 Show this help message"
+            exit 0
+            ;;
+        \?)
+            echo "Invalid option: -$OPTARG" >&2
+            exit 1
+            ;;
+    esac
+done
 
 # Get user info from git config
 GIT_NAME=$(git config user.name)
@@ -25,6 +60,18 @@ fi
 export DEBEMAIL="$GIT_EMAIL"
 export DEBFULLNAME="$GIT_NAME"
 
+# If no version specified, increment patch version
+if [ -z "$NEW_VERSION" ]; then
+    CURRENT_VERSION=$(get_current_version)
+    NEW_VERSION=$(increment_patch_version "$CURRENT_VERSION")
+    echo "No version specified. Incrementing patch version from $CURRENT_VERSION to $NEW_VERSION"
+fi
+
+# If no commit message specified, use default
+if [ -z "$COMMIT_MSG" ]; then
+    COMMIT_MSG="Bump version to $NEW_VERSION"
+fi
+
 echo "Updating version to $NEW_VERSION..."
 
 # Update setup.py - preserving quote style
@@ -37,19 +84,19 @@ else
 fi
 
 # Update debian/changelog
-dch --newversion "$NEW_VERSION" --distribution stable --urgency medium "Release $NEW_VERSION"
+dch --newversion "$NEW_VERSION" --distribution stable --urgency medium "$COMMIT_MSG"
 dch --release ""
 
 # Create git commit and tag
 git add setup.py debian/changelog
-git commit -m "Bump version to $NEW_VERSION"
+git commit -m "$COMMIT_MSG"
 git tag -a "v$NEW_VERSION" -m "Release version $NEW_VERSION"
 
 echo "Version bumped to $NEW_VERSION"
 echo "Changes made:"
 echo "  - Updated setup.py version"
 echo "  - Updated debian/changelog"
-echo "  - Created git commit"
+echo "  - Created git commit with message: $COMMIT_MSG"
 echo "  - Created git tag v$NEW_VERSION"
 echo ""
 echo "Don't forget to push changes and tags:"

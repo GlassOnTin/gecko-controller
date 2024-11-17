@@ -1,23 +1,55 @@
 #!/usr/bin/env python3
 # gecko_controller/web/app.py
-from flask import Flask, render_template, jsonify, request
+from flask import Flask, render_template, jsonify, request, send_from_directory
 import os
 import re
 import csv
 from datetime import datetime, timedelta
-import pkg_resources
-import shutil
 import importlib.util
 import sys
 from typing import Dict, Any, Tuple
 import time
 
-app = Flask(__name__)
-app.template_folder = pkg_resources.resource_filename('gecko_controller.web', 'templates')
+def get_app_paths():
+    """Determine the correct paths for templates and static files"""
+    # Check if we're running from the development directory
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    dev_template_dir = os.path.join(current_dir, 'templates')
+    dev_static_dir = os.path.join(current_dir, 'static')
+    
+    # Check if development directories exist
+    if os.path.isdir(dev_template_dir) and os.path.isdir(dev_static_dir):
+        return dev_template_dir, dev_static_dir
+    
+    # Fall back to installed package location
+    try:
+        import pkg_resources
+        template_dir = pkg_resources.resource_filename('gecko_controller.web', 'templates')
+        static_dir = pkg_resources.resource_filename('gecko_controller.web', 'static')
+        return template_dir, static_dir
+    except ImportError:
+        # If all else fails, return the development paths anyway
+        return dev_template_dir, dev_static_dir
 
+# Initialize Flask app with correct paths
+template_dir, static_dir = get_app_paths()
+app = Flask(__name__, 
+           template_folder=template_dir,
+           static_folder=static_dir)
+
+# Rest of your existing code remains the same...
 CONFIG_FILE = '/etc/gecko-controller/config.py'
 BACKUP_FILE = '/etc/gecko-controller/config.py.bak'
 LOG_FILE = '/var/log/gecko-controller/readings.csv'
+
+# Add some debugging information at startup
+@app.before_first_request
+def log_startup_info():
+    app.logger.info(f'Current working directory: {os.getcwd()}')
+    app.logger.info(f'Template folder: {app.template_folder}')
+    app.logger.info(f'Static folder: {app.static_folder}')
+    app.logger.info(f'Template folder exists: {os.path.exists(app.template_folder)}')
+    app.logger.info(f'Static folder exists: {os.path.exists(app.static_folder)}')
 
 # Define all required fields and their types
 REQUIRED_CONFIG = {
@@ -329,7 +361,7 @@ def read_logs(hours=24):
             for row in reader:
                 try:
                     # Create full timestamp object for proper sorting
-                    timestamp = datetime.strptime(row[0] + " " + row[1], '%Y-%m-%d %H:%M:%S.%f')
+                    timestamp = datetime.strptime(row[0] + "." + row[1], '%Y-%m-%d %H:%M:%S.%f')
                     
                     # Skip entries older than cutoff
                     if timestamp < cutoff_time:
@@ -372,20 +404,43 @@ def read_logs(hours=24):
         
     return data
 
+@app.route('/static/<path:path>')
+def send_static(path):
+    app.logger.debug(f'Static file requested: {path}')
+    try:
+        full_path = os.path.join(app.static_folder, path)
+        app.logger.debug(f'Full path: {full_path}')
+        app.logger.debug(f'File exists: {os.path.exists(full_path)}')
+        return send_from_directory(app.static_folder, path)
+    except Exception as e:
+        app.logger.error(f'Error serving static file {path}: {str(e)}')
+        return str(e), 404
+
 @app.route('/')
 def index():
     """Render the main page"""
-    config = read_config()
-    return render_template('index.html', config=config)
+    try:
+        app.logger.debug('Index route accessed')
+        app.logger.debug(f'Static folder: {app.static_folder}')
+        app.logger.debug(f'Template folder: {app.template_folder}')
+        config = read_config()
+        app.logger.debug(f'Config loaded: {config}')
+        return render_template('index.html', config=config)
+    except Exception as e:
+        app.logger.error(f'Error rendering index: {str(e)}')
+        return str(e), 500
 
 @app.route('/api/config', methods=['GET'])
 def get_config():
     """Get current configuration"""
+    app.logger.debug('/api/config accessed')
     return jsonify(read_config())
+
 
 @app.route('/api/logs')
 def get_logs():
     """Get log data"""
+    app.logger.debug('/api/logs accessed')
     hours = request.args.get('hours', default=24, type=int)
     print(f"Received log request for past {hours} hours")
             
@@ -393,8 +448,16 @@ def get_logs():
     print(f"Returning {len(data['timestamps'])} data points")
             
     return jsonify(data)
-
+    
+@app.after_request
+def add_header(response):
+    response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, post-check=0, pre-check=0, max-age=0'
+    response.headers['Pragma'] = 'no-cache'
+    response.headers['Expires'] = '-1'
+    return response
+    
 def main():
+    app.logger.info('Starting Flask application...')
     app.run(host='0.0.0.0', port=80)
 
 if __name__ == '__main__':

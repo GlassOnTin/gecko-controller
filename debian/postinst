@@ -33,7 +33,8 @@ case "$1" in
         "$VENV_DIR/bin/pip" install \
             'RPi.GPIO' \
             'smbus2' \
-            'Pillow'
+            'Pillow' \
+            'Flask'
 
         # Verify installations
         log "Verifying installations"

@@ -23,9 +23,8 @@ rm -rf "${PROJECT_ROOT}/build/"
 rm -rf "${PROJECT_ROOT}/dist/"
 rm -rf "${PROJECT_ROOT}/.pybuild/"
 rm -rf "${PROJECT_ROOT}"/*.egg-info/
-rm -rf "${PROJECT_ROOT}"/__pycache__/
-rm -rf "${PROJECT_ROOT}/gecko_controller"/__pycache__/
-rm -f "${PROJECT_ROOT}/gecko_controller"/*.pyc
+find "${PROJECT_ROOT}" -type d -name "__pycache__" -exec rm -rf {} +
+find "${PROJECT_ROOT}" -type f -name "*.pyc" -delete
 
 # Clean dpkg build artifacts
 rm -f "${PROJECT_ROOT}"/../gecko-controller_*.deb
@@ -34,5 +33,25 @@ rm -f "${PROJECT_ROOT}"/../gecko-controller_*.build
 rm -f "${PROJECT_ROOT}"/../gecko-controller_*.buildinfo
 rm -f "${PROJECT_ROOT}"/../gecko-controller_*.tar.xz
 rm -f "${PROJECT_ROOT}"/../gecko-controller_*.dsc
+
+# Clean editor temporary files
+find "${PROJECT_ROOT}" -type f -name "*.swp" -delete
+find "${PROJECT_ROOT}" -type f -name ".*.swp" -delete
+find "${PROJECT_ROOT}" -type f -name "*.swo" -delete
+find "${PROJECT_ROOT}" -type f -name ".*.swo" -delete
+find "${PROJECT_ROOT}" -type f -name "*~" -delete
+find "${PROJECT_ROOT}" -type f -name ".#*" -delete
+find "${PROJECT_ROOT}" -type f -name "*.bak" -delete
+
+# Clean IDE specific files
+rm -rf "${PROJECT_ROOT}"/.idea/
+rm -rf "${PROJECT_ROOT}"/.vscode/
+rm -rf "${PROJECT_ROOT}"/*.sublime-workspace
+rm -rf "${PROJECT_ROOT}"/*.sublime-project
+
+# Clean test cache
+rm -rf "${PROJECT_ROOT}"/.pytest_cache/
+rm -rf "${PROJECT_ROOT}"/.coverage
+rm -rf "${PROJECT_ROOT}"/htmlcov/
 
 echo "Project cleaned successfully!"

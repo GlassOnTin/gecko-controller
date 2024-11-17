@@ -7,8 +7,8 @@ Type=simple
 User=root
 Group=root
 WorkingDirectory=/opt/gecko-controller
-Environment=PYTHONPATH=/opt/gecko-controller
-ExecStart=/usr/bin/gecko-controller
+Environment=PYTHONPATH=/usr/lib/python3/dist-packages
+ExecStart=/opt/gecko-controller/venv/bin/python3 -m gecko_controller.controller
 Restart=always
 RestartSec=10
 
