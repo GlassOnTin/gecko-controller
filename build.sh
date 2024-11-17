@@ -35,4 +35,4 @@ echo "3. Start the web interface: sudo systemctl start gecko-web"
 echo "4. Enable web interface autostart: sudo systemctl enable gecko-web"
 echo "5. Check status: sudo systemctl status gecko-web"
 echo
-echo "The web interface will be available at http://localhost:8080"
+echo "The web interface will be available at http://localhost/"

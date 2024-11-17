@@ -190,7 +190,12 @@
                     <div class="section">
                         <h3>Hardware Configuration</h3>
                         <label for="DISPLAY_ADDRESS">Display I2C Address (hex)</label>
-                        <input type="text" id="DISPLAY_ADDRESS" name="DISPLAY_ADDRESS" pattern="0x[0-9A-Fa-f]{2}" placeholder="0x3c">
+                        <input type="text" 
+                               id="DISPLAY_ADDRESS" 
+                               name="DISPLAY_ADDRESS" 
+                               pattern="0x[0-9A-Fa-f]{2}" 
+                               placeholder="0x3c"
+                               onchange="formatI2CAddress(this)">
                         
                         <label for="DISPLAY_RESET">Display Reset Pin</label>
                         <input type="number" id="DISPLAY_RESET" name="DISPLAY_RESET" min="0" max="27">

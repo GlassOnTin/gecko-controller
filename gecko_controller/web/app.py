@@ -4,14 +4,23 @@ from flask import Flask, render_template, jsonify, request, send_from_directory
 import os
 import re
 import csv
-from datetime import datetime, timedelta
-import importlib.util
 import sys
-from typing import Dict, Any, Tuple
 import time
+import shutil
+import stat
+from datetime import datetime, timedelta
+from pathlib import Path
+import importlib.util
+from typing import Dict, Any, Tuple
+from typing import Tuple, Optional
+import logging
 
 def get_app_paths():
     """Determine the correct paths for templates and static files"""
+    # In your main() function
+    os.makedirs('/etc/gecko-controller', mode=0o755, exist_ok=True)
+    os.makedirs('/var/log/gecko-controller', mode=0o755, exist_ok=True)
+
     # Check if we're running from the development directory
     current_dir = os.path.dirname(os.path.abspath(__file__))
     dev_template_dir = os.path.join(current_dir, 'templates')
@@ -89,7 +98,7 @@ REQUIRED_CONFIG = {
 
 class ConfigValidationError(Exception):
     """Custom exception for config validation failures"""
-    pass
+    pass        
 
 def validate_config_module(module) -> bool:
     """Validate that all required fields are present and of correct type"""
@@ -179,51 +188,257 @@ def load_config_module(config_path: str) -> Tuple[Any, bool]:
         print(f"Error loading config from {config_path}: {str(e)}")
         return None, False
 
-def create_backup() -> bool:
-    """Create a backup of the current config file"""
+class ConfigError(Exception):
+    """Base exception for configuration errors"""
+    pass
+
+class ConfigPermissionError(ConfigError):
+    """Raised when there are permission issues with config files"""
+    pass
+
+class ConfigBackupError(ConfigError):
+    """Raised when backup operations fail"""
+    pass
+
+def check_file_permissions(path: str) -> Tuple[bool, Optional[str]]:
+    """
+    Check if we have read/write permissions for a file or its parent directory if it doesn't exist
+    Returns: (has_permission, error_message)
+    """
     try:
-        shutil.copy2(CONFIG_FILE, BACKUP_FILE)
+        path_obj = Path(path)
+        
+        # If file exists, check its permissions
+        if path_obj.exists():
+            # Check if we can read and write
+            readable = os.access(path, os.R_OK)
+            writable = os.access(path, os.W_OK)
+            if not (readable and writable):
+                return False, f"Insufficient permissions for {path}. Current permissions: {stat.filemode(path_obj.stat().st_mode)}"
+                
+        # If file doesn't exist, check parent directory permissions
+        else:
+            parent = path_obj.parent
+            if not parent.exists():
+                return False, f"Parent directory {parent} does not exist"
+            if not os.access(parent, os.W_OK):
+                return False, f"Cannot write to parent directory {parent}"
+                
+        return True, None
+        
+    except Exception as e:
+        return False, f"Error checking permissions: {str(e)}"
+
+def create_backup(config_file: str, backup_file: str, logger: logging.Logger) -> bool:
+    """
+    Create a backup of the config file with proper permission checking
+    
+    Args:
+        config_file: Path to the main config file
+        backup_file: Path to the backup location
+        logger: Logger instance for recording operations
+        
+    Returns:
+        bool: True if backup was successful
+    
+    Raises:
+        ConfigPermissionError: If permission issues prevent backup
+        ConfigBackupError: If backup fails for other reasons
+    """
+    try:
+        # Check if source config exists
+        if not os.path.exists(config_file):
+            raise ConfigBackupError(f"Config file {config_file} does not exist")
+            
+        # Check permissions on source and destination
+        src_ok, src_error = check_file_permissions(config_file)
+        if not src_ok:
+            raise ConfigPermissionError(f"Source file permission error: {src_error}")
+            
+        dst_ok, dst_error = check_file_permissions(backup_file)
+        if not dst_ok:
+            raise ConfigPermissionError(f"Destination file permission error: {dst_error}")
+            
+        # Create parent directory for backup if it doesn't exist
+        backup_dir = os.path.dirname(backup_file)
+        if not os.path.exists(backup_dir):
+            try:
+                os.makedirs(backup_dir, mode=0o755, exist_ok=True)
+            except Exception as e:
+                raise ConfigPermissionError(f"Failed to create backup directory: {str(e)}")
+        
+        # Perform the backup
+        shutil.copy2(config_file, backup_file)
+        
+        # Verify the backup
+        if not os.path.exists(backup_file):
+            raise ConfigBackupError("Backup file was not created")
+            
+        # Ensure backup is readable
+        if not os.access(backup_file, os.R_OK):
+            raise ConfigPermissionError("Created backup file is not readable")
+            
+        logger.info(f"Successfully created backup at {backup_file}")
         return True
+        
+    except (ConfigPermissionError, ConfigBackupError) as e:
+        logger.error(str(e))
+        raise
     except Exception as e:
-        print(f"Failed to create backup: {str(e)}")
-        return False
+        msg = f"Unexpected error during backup: {str(e)}"
+        logger.error(msg)
+        raise ConfigBackupError(msg)
 
-def restore_backup() -> bool:
-    """Restore config from backup file"""
+def restore_backup(config_file: str, backup_file: str, logger: logging.Logger) -> bool:
+    """
+    Restore config from backup with proper permission checking
+    
+    Args:
+        config_file: Path to the main config file
+        backup_file: Path to the backup location
+        logger: Logger instance for recording operations
+        
+    Returns:
+        bool: True if restoration was successful
+    
+    Raises:
+        ConfigPermissionError: If permission issues prevent restoration
+        ConfigBackupError: If restoration fails for other reasons
+    """
     try:
-        if os.path.exists(BACKUP_FILE):
-            shutil.copy2(BACKUP_FILE, CONFIG_FILE)
-            return True
-        return False
+        # Check if backup exists
+        if not os.path.exists(backup_file):
+            raise ConfigBackupError("No backup file found")
+            
+        # Check permissions
+        src_ok, src_error = check_file_permissions(backup_file)
+        if not src_ok:
+            raise ConfigPermissionError(f"Backup file permission error: {src_error}")
+            
+        dst_ok, dst_error = check_file_permissions(config_file)
+        if not dst_ok:
+            raise ConfigPermissionError(f"Config file permission error: {dst_error}")
+            
+        # Perform the restoration
+        shutil.copy2(backup_file, config_file)
+        
+        # Verify the restoration
+        if not os.path.exists(config_file):
+            raise ConfigBackupError("Config file was not restored")
+            
+        # Ensure restored file is readable
+        if not os.access(config_file, os.R_OK):
+            raise ConfigPermissionError("Restored config file is not readable")
+            
+        logger.info(f"Successfully restored config from {backup_file}")
+        return True
+        
+    except (ConfigPermissionError, ConfigBackupError) as e:
+        logger.error(str(e))
+        raise
     except Exception as e:
-        print(f"Failed to restore backup: {str(e)}")
-        return False
+        msg = f"Unexpected error during restoration: {str(e)}"
+        logger.error(msg)
+        raise ConfigBackupError(msg)
 
-def write_config(config: Dict[str, Any]) -> bool:
-    """Write config back to file with backup and validation"""
-    # Create backup first
-    if not create_backup():
-        raise ConfigValidationError("Failed to create backup, aborting config update")
+def write_config(config: Dict[str, Any], logger: Optional[logging.Logger] = None) -> bool:
+    """
+    Write config to file with atomic operation and validation
+    
+    Args:
+        config: Dictionary containing configuration values
+        logger: Optional logger instance for recording operations
+    
+    Returns:
+        bool: True if write was successful
+    
+    Raises:
+        ConfigPermissionError: If permission issues prevent writing
+        ConfigValidationError: If the new config is invalid
+    """
+    # Use a null logger if none provided
+    if logger is None:
+        logger = logging.getLogger('null')
+        logger.addHandler(logging.NullHandler())
 
     try:
-        # Generate the new config file content
+        # First validate the new config values before writing anything
+        for field, (expected_type, validator) in REQUIRED_CONFIG.items():
+            if field not in config:
+                raise ConfigValidationError(f"Missing required field: {field}")
+                
+            value = config[field]
+            
+            # Perform type checking
+            if expected_type == 'int':
+                if not isinstance(value, int):
+                    raise ConfigValidationError(f"Field {field} must be an integer")
+            elif expected_type == 'float':
+                if not isinstance(value, (int, float)):
+                    raise ConfigValidationError(f"Field {field} must be a number")
+                value = float(value)
+            elif expected_type == 'time_str':
+                if not isinstance(value, str):
+                    raise ConfigValidationError(f"Field {field} must be a time string (HH:MM)")
+            elif expected_type == 'dict':
+                if not isinstance(value, dict):
+                    raise ConfigValidationError(f"Field {field} must be a dictionary")
+                    
+            # Perform value validation
+            if not validator(value):
+                raise ConfigValidationError(f"Invalid value for {field}: {value}")
+        
+        # Check special case: DAY_TEMP > MIN_TEMP
+        if config['DAY_TEMP'] <= config['MIN_TEMP']:
+            raise ConfigValidationError("DAY_TEMP must be greater than MIN_TEMP")
+            
+        # Check permissions on config file
+        ok, error = check_file_permissions(CONFIG_FILE)
+        if not ok:
+            raise ConfigPermissionError(f"Config file permission error: {error}")
+            
+        # Generate the new config content
         content = create_config_content(config)
         
-        # Write the new config file
-        with open(CONFIG_FILE, 'w') as f:
-            f.write(content)
+        # Write to a temporary file first (atomic operation)
+        temp_file = f"{CONFIG_FILE}.tmp"
+        try:
+            with open(temp_file, 'w') as f:
+                f.write(content)
+                # Ensure content is written to disk
+                f.flush()
+                os.fsync(f.fileno())
+                
+            # Set permissions on temp file to match intended config file
+            os.chmod(temp_file, 0o644)
             
-        # Validate the new config
+            # Atomically replace the old config with the new one
+            os.replace(temp_file, CONFIG_FILE)
+            
+        except Exception as e:
+            # Clean up temp file if it exists
+            if os.path.exists(temp_file):
+                try:
+                    os.unlink(temp_file)
+                except:
+                    pass
+            raise ConfigError(f"Failed to write config: {str(e)}")
+            
+        # Validate the newly written config
         module, success = load_config_module(CONFIG_FILE)
-        if not success:
-            raise ConfigValidationError("New config file failed validation")
+        if not success or module is None:
+            raise ConfigValidationError("New config file failed validation after writing")
             
+        logger.info("Successfully wrote and validated new configuration")
         return True
         
+    except (ConfigValidationError, ConfigPermissionError) as e:
+        logger.error(str(e))
+        raise
     except Exception as e:
-        # Restore backup if anything goes wrong
-        restore_backup()
-        raise ConfigValidationError(f"Failed to update config: {str(e)}")
+        msg = f"Unexpected error writing config: {str(e)}"
+        logger.error(msg)
+        raise ConfigError(msg)
 
 @app.route('/api/config', methods=['POST'])
 def update_config():
@@ -239,24 +454,53 @@ def update_config():
                 'message': f'Missing required fields: {", ".join(missing_fields)}'
             }), 400
         
-        # Write and validate new config
-        if write_config(new_config):
-            # Wait briefly to ensure file is written
-            time.sleep(0.5)
-            # Restart the gecko-controller service to apply changes
-            os.system('systemctl restart gecko-controller')
-            return jsonify({'status': 'success'})
-        else:
+        # Create backup first
+        try:
+            create_backup(CONFIG_FILE, BACKUP_FILE, app.logger)
+        except ConfigPermissionError as e:
             return jsonify({
                 'status': 'error',
-                'message': 'Failed to update configuration'
+                'message': f'Permission error: {str(e)}'
+            }), 403
+        except ConfigBackupError as e:
+            return jsonify({
+                'status': 'error',
+                'message': f'Backup error: {str(e)}'
             }), 500
             
-    except ConfigValidationError as e:
-        return jsonify({
-            'status': 'error',
-            'message': str(e)
-        }), 400
+        # Write and validate new config
+        try:
+            if write_config(new_config, app.logger):
+                time.sleep(0.5)
+                os.system('systemctl restart gecko-controller')
+                return jsonify({'status': 'success'})
+        except ConfigValidationError as e:
+            # Try to restore from backup
+            try:
+                restore_backup(CONFIG_FILE, BACKUP_FILE, app.logger)
+                return jsonify({
+                    'status': 'error',
+                    'message': f'Config validation failed and restored from backup: {str(e)}'
+                }), 400
+            except (ConfigPermissionError, ConfigBackupError) as restore_error:
+                return jsonify({
+                    'status': 'error',
+                    'message': f'Config validation failed and backup restoration also failed: {str(restore_error)}'
+                }), 500
+        except Exception as e:
+            # Try to restore from backup
+            try:
+                restore_backup(CONFIG_FILE, BACKUP_FILE, app.logger)
+                return jsonify({
+                    'status': 'error',
+                    'message': f'Config update failed and restored from backup: {str(e)}'
+                }), 500
+            except (ConfigPermissionError, ConfigBackupError) as restore_error:
+                return jsonify({
+                    'status': 'error',
+                    'message': f'Config update failed and backup restoration also failed: {str(restore_error)}'
+                }), 500
+                
     except Exception as e:
         return jsonify({
             'status': 'error',
@@ -264,17 +508,128 @@ def update_config():
         }), 500
 
 @app.route('/api/config/restore', methods=['POST'])
-def restore_config():
-    """Endpoint to restore config from backup"""
+def restore_config_endpoint():
+    """
+    Endpoint to restore config from backup with comprehensive validation and error handling
+    
+    Returns:
+        JSON response indicating success or detailed error information
+        HTTP status codes:
+        - 200: Success
+        - 403: Permission denied
+        - 404: Backup not found
+        - 500: Server error or validation failure
+    """
     try:
-        if restore_backup():
-            time.sleep(0.5)  # Wait briefly to ensure file is restored
-            os.system('systemctl restart gecko-controller')
-            return jsonify({'status': 'success'})
+        # First verify backup exists and is readable
+        if not os.path.exists(BACKUP_FILE):
+            return jsonify({
+                'status': 'error',
+                'message': 'No backup file found'
+            }), 404
+
+        # Pre-validate backup content before attempting restore
+        module, success = load_config_module(BACKUP_FILE)
+        if not success or module is None:
+            return jsonify({
+                'status': 'error',
+                'message': 'Backup file failed validation, cannot restore'
+            }), 500
+
+        try:
+            # Attempt to restore using the improved restore_backup function
+            if restore_backup(CONFIG_FILE, BACKUP_FILE, app.logger):
+                # Double check the restored config
+                restored_module, restored_success = load_config_module(CONFIG_FILE)
+                if not restored_success or restored_module is None:
+                    # If validation fails after restore, try to recover
+                    app.logger.error("Restored config failed validation")
+                    return jsonify({
+                        'status': 'error',
+                        'message': 'Restored config failed validation'
+                    }), 500
+
+                # Brief pause to ensure file operations are complete
+                time.sleep(0.5)
+                
+                try:
+                    # Attempt to restart the service
+                    result = os.system('systemctl restart gecko-controller')
+                    if result != 0:
+                        app.logger.warning("Service restart failed but config was restored")
+                        return jsonify({
+                            'status': 'partial',
+                            'message': 'Config restored but service restart failed'
+                        }), 500
+                    
+                    return jsonify({
+                        'status': 'success',
+                        'message': 'Configuration restored and service restarted'
+                    })
+                    
+                except Exception as service_error:
+                    app.logger.error(f"Service restart error: {str(service_error)}")
+                    return jsonify({
+                        'status': 'partial',
+                        'message': 'Config restored but service restart failed'
+                    }), 500
+
+        except ConfigPermissionError as e:
+            app.logger.error(f"Permission error during restore: {str(e)}")
+            return jsonify({
+                'status': 'error',
+                'message': f'Permission denied: {str(e)}'
+            }), 403
+            
+        except ConfigBackupError as e:
+            app.logger.error(f"Backup error during restore: {str(e)}")
+            return jsonify({
+                'status': 'error',
+                'message': f'Backup error: {str(e)}'
+            }), 500
+                
+    except Exception as e:
+        app.logger.error(f"Unexpected error in restore endpoint: {str(e)}")
         return jsonify({
             'status': 'error',
-            'message': 'No backup file found'
-        }), 404
+            'message': f'Unexpected error: {str(e)}'
+        }), 500
+
+def get_service_status():
+    """Helper function to check gecko-controller service status"""
+    try:
+        result = os.system('systemctl is-active --quiet gecko-controller')
+        return result == 0
+    except:
+        return False
+
+# Optional: Add a status endpoint to check service health
+@app.route('/api/status', methods=['GET'])
+def get_status():
+    """Get current service and config status"""
+    try:
+        config_exists = os.path.exists(CONFIG_FILE)
+        backup_exists = os.path.exists(BACKUP_FILE)
+        service_running = get_service_status()
+        
+        # Try to validate current config
+        config_valid = False
+        if config_exists:
+            module, success = load_config_module(CONFIG_FILE)
+            config_valid = success and module is not None
+            
+        return jsonify({
+            'status': 'ok',
+            'details': {
+                'config_exists': config_exists,
+                'config_valid': config_valid,
+                'backup_exists': backup_exists,
+                'service_running': service_running,
+                'config_path': CONFIG_FILE,
+                'backup_path': BACKUP_FILE
+            }
+        })
+        
     except Exception as e:
         return jsonify({
             'status': 'error',

@@ -1,3 +1,9 @@
+gecko-controller (0.7.2) stable; urgency=medium
+
+  * Include missing files!
+
+ -- GlassOnTin <63980135+GlassOnTin@users.noreply.github.com>  Sun, 17 Nov 2024 01:18:47 +0000
+
 gecko-controller (0.7.1) stable; urgency=medium
 
   * When light sensor is disconnected, use -1 for values

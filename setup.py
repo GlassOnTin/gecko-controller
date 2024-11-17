@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="gecko_controller",
-    version="0.7.1",
+    version="0.7.2",
     packages=find_packages(),
     package_data={
         'gecko_controller': [

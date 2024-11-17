@@ -390,11 +390,11 @@ class GeckoController:
             self.logger.info(
                 "",
                 extra={
-                    'temp': temp if temp is not None else -999,
-                    'humidity': humidity if humidity is not None else -999,
-                    'uva': uva if uva is not None else -999,
-                    'uvb': uvb if uvb is not None else -999,
-                    'uvc': uvc if uvc is not None else -999,
+                    'temp': temp if temp is not None else -1,
+                    'humidity': humidity if humidity is not None else -1,
+                    'uva': uva if uva is not None else -1,
+                    'uvb': uvb if uvb is not None else -1,
+                    'uvc': uvc if uvc is not None else -1,
                     'light': 1 if light_status else 0,
                     'heat': 1 if heat_status else 0
                 }
