@@ -182,7 +182,6 @@ class GeckoController:
             self.uv_sensor = AS7331(1)
             self.uv_sensor.integration_time = INTEGRATION_TIME_256MS
             self.uv_sensor.gain = GAIN_16X
-            self.uv_sensor.measurement_mode = MEASUREMENT_MODE_CONTINUOUS
             
         if self.uv_sensor:
             print("UV Sensor (AS7331) ready")

@@ -1,0 +1,4 @@
+RPi.GPIO
+flask
+pillow
+smbus2
