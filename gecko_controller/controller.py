@@ -12,7 +12,6 @@ import pathlib
 from typing import Tuple, Optional
 from pathlib import Path
 
-
 # Constants for logging
 LOG_DIR = "/var/log/gecko-controller"
 LOG_FILE = "readings.csv"
@@ -126,16 +125,6 @@ class SSH1106Display:
 
 class GeckoController:
     def __init__(self):
-        # Convert time settings from config to datetime.time objects
-        self.light_on_time = self.parse_time_setting(LIGHT_ON_TIME)
-        self.light_off_time = self.parse_time_setting(LIGHT_OFF_TIME)
-        print(f"Light on @ {self.light_on_time}, Light off @ {self.light_off_time}\n")
-        
-        # Use thresholds from config
-        self.UVA_THRESHOLDS = UVA_THRESHOLDS
-        self.UVB_THRESHOLDS = UVB_THRESHOLDS
-        print(f"UVA Thresholds = {self.UVA_THRESHOLDS}, UVB Thresholds = {self.UVB_THRESHOLDS}\n")
- 
         # GPIO Setup
         GPIO.setmode(GPIO.BCM)
         GPIO.setup(LIGHT_RELAY, GPIO.OUT)
@@ -149,11 +138,27 @@ class GeckoController:
         self.setup_logging()
         self.last_log_time = 0
         self.bus = smbus2.SMBus(1)
+
+        # Convert time settings from config to datetime.time objects
+        self.light_on_time = self.parse_time_setting(LIGHT_ON_TIME)
+        self.light_off_time = self.parse_time_setting(LIGHT_OFF_TIME)
+        print(f"Light on @ {self.light_on_time}, Light off @ {self.light_off_time}\n")
         
+        # Use thresholds from config
+        self.UVA_THRESHOLDS = UVA_THRESHOLDS
+        self.UVB_THRESHOLDS = UVB_THRESHOLDS
+        print(f"UVA Thresholds = {self.UVA_THRESHOLDS}, UVB Thresholds = {self.UVB_THRESHOLDS}\n")
+ 
+        # Calculate UV correction factor
+        self.uv_correction_factor = self.calculate_uv_correction()
+        print(f"\nUV Correction Factor: {self.uv_correction_factor:.3f}")
+        print(f"Sensor Position: {SENSOR_HEIGHT}m height, {LAMP_DIST_FROM_BACK}m from back")
+        print(f"Lamp Height: {ENCLOSURE_HEIGHT}m, Sensor Angle: {SENSOR_ANGLE}°\n")
+
         # UV sensor configuration with fallback paths
         try:
             # First try relative import (when installed as package)
-            from .as7331 import AS7331, INTEGRATION_TIME_256MS, GAIN_16X
+            from .as7331 import AS7331, INTEGRATION_TIME_256MS, GAIN_16X, MEASUREMENT_MODE_CONTINUOUS
         except ImportError:
             try:
                 # Try importing from the same directory as this script
@@ -161,26 +166,27 @@ class GeckoController:
                 import sys
                 script_dir = os.path.dirname(os.path.abspath(__file__))
                 sys.path.append(script_dir)
-                from as7331 import AS7331, INTEGRATION_TIME_256MS, GAIN_16X
+                from as7331 import AS7331, INTEGRATION_TIME_256MS, GAIN_16X, MEASUREMENT_MODE_CONTINUOUS
+                print("Imported UV sensor (as7331) module ok")
             except ImportError:
-                print("Warning: AS7331 module not found, UV sensing disabled")
+                print("Warning: UV sensor module (AS7331) not found. UV sensing disabled")
                 print(f"Looked in: {script_dir}")
                 print("Make sure as7331.py is in the same directory as this script")
                 self.uv_sensor = None
             else:
-                self.uv_sensor = AS7331(1)
+                self.uv_sensor = AS7331(1)                
                 self.uv_sensor.integration_time = INTEGRATION_TIME_256MS
                 self.uv_sensor.gain = GAIN_16X
+                self.uv_sensor.measurement_mode = MEASUREMENT_MODE_CONTINUOUS
         else:
             self.uv_sensor = AS7331(1)
             self.uv_sensor.integration_time = INTEGRATION_TIME_256MS
             self.uv_sensor.gain = GAIN_16X
-
-        # Calculate UV correction factor
-        self.uv_correction_factor = self.calculate_uv_correction()
-        print(f"\nUV Correction Factor: {self.uv_correction_factor:.3f}")
-        print(f"Sensor Position: {SENSOR_HEIGHT}m height, {LAMP_DIST_FROM_BACK}m from back")
-        print(f"Lamp Height: {ENCLOSURE_HEIGHT}m, Sensor Angle: {SENSOR_ANGLE}°\n")
+            
+        if self.uv_sensor:
+            print("UV Sensor (AS7331) ready")
+            print(f"  measurement mode: {self.uv_sensor.measurement_mode_as_string}")
+            print(f"  standby state:    {self.uv_sensor.standby_state}")
 
         # Create an image buffer
         self.image = Image.new('1', (128, 64), 255)  # 255 = white background
@@ -421,12 +427,16 @@ class GeckoController:
         """Read UV values from the sensor and apply geometric correction"""
         try:
             if self.uv_sensor is None:
+                print(f"UV sensor is None")
                 return None, None, None
-            uva, uvb, uvc, temp = self.uv_sensor.values
+            uva, uvb, uvc, temp = self.uv_sensor.values            
             
             # Apply correction factor
             if uva is not None:
                 uva = uva * self.uv_correction_factor
+            else:
+                print(f"UV sensor read error")
+                
             if uvb is not None:
                 uvb = uvb * self.uv_correction_factor
             if uvc is not None:
@@ -476,15 +486,16 @@ class GeckoController:
             while True:
                 temp, humidity = self.read_sensor()
                 uva, uvb, uvc = self.read_uv()
+                light_status = self.control_light()
+                heat_status = self.control_heat(temp)
+                #print(temp,humidity,uva, uvb, uvc, light_status, heat_status)
 
                 if temp is not None and humidity is not None:
-                    light_status = self.control_light()
-                    heat_status = self.control_heat(temp)
                     self.update_display(temp, humidity, uva, uvb, uvc,
                                       light_status, heat_status)
                     self.log_readings(temp, humidity, uva, uvb, uvc,
                                     light_status, heat_status)
-                time.sleep(2)
+                time.sleep(10)
 
         except KeyboardInterrupt:
             print("\nShutting down...")

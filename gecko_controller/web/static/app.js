@@ -473,14 +473,14 @@ document.addEventListener('DOMContentLoaded', function() {
                             data: []
                         },
                         {
-                            label: 'UVB (μW/cm²)',
+                            label: 'UVB (mW/cm²)',
                             borderColor: 'rgb(75, 192, 192)',
                             yAxisID: 'y1',
                             tension: 0.1,
                             data: []
                         },
                         {
-                            label: 'UVC (μW/cm²)',
+                            label: 'UVC (mW/cm²)',
                             borderColor: 'rgb(153, 102, 255)',
                             yAxisID: 'y1',
                             tension: 0.1,
@@ -508,6 +508,8 @@ document.addEventListener('DOMContentLoaded', function() {
                                 text: 'UVA (mW/cm²)'
                             },
                             beginAtZero: true,
+                            min:0,
+                            suggestedMax: 200
                         },
                         y1: {
                             type: 'linear',
@@ -515,9 +517,11 @@ document.addEventListener('DOMContentLoaded', function() {
                             position: 'right',
                             title: {
                                 display: true,
-                                text: 'UVB/UVC (μW/cm²)'
+                                text: 'UVB/UVC (mW/cm²)'
                             },
                             beginAtZero: true,
+                            min:0,
+                            suggestedMax: 10,
                             grid: {
                                 drawOnChartArea: false,
                             },
