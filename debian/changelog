@@ -1,3 +1,9 @@
+gecko-controller (0.7.4) stable; urgency=medium
+
+  * Bump version to 0.7.4
+
+ -- GlassOnTin <63980135+GlassOnTin@users.noreply.github.com>  Sun, 17 Nov 2024 16:31:51 +0000
+
 gecko-controller (0.7.3) stable; urgency=medium
 
   * Fixed UV sensor and corrected chart scale
