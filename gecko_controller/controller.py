@@ -129,7 +129,7 @@ class GeckoController:
         GPIO.setmode(GPIO.BCM)
         GPIO.setup(LIGHT_RELAY, GPIO.OUT)
         GPIO.setup(HEAT_RELAY, GPIO.OUT)
-        
+
         if hasattr(self, 'DISPLAY_RESET'):
             GPIO.setup(DISPLAY_RESET, GPIO.OUT)
             GPIO.output(DISPLAY_RESET, GPIO.HIGH)  # Start with reset inactive
@@ -143,12 +143,12 @@ class GeckoController:
         self.light_on_time = self.parse_time_setting(LIGHT_ON_TIME)
         self.light_off_time = self.parse_time_setting(LIGHT_OFF_TIME)
         print(f"Light on @ {self.light_on_time}, Light off @ {self.light_off_time}\n")
-        
+
         # Use thresholds from config
         self.UVA_THRESHOLDS = UVA_THRESHOLDS
         self.UVB_THRESHOLDS = UVB_THRESHOLDS
         print(f"UVA Thresholds = {self.UVA_THRESHOLDS}, UVB Thresholds = {self.UVB_THRESHOLDS}\n")
- 
+
         # Calculate UV correction factor
         self.uv_correction_factor = self.calculate_uv_correction()
         print(f"\nUV Correction Factor: {self.uv_correction_factor:.3f}")
@@ -174,7 +174,7 @@ class GeckoController:
                 print("Make sure as7331.py is in the same directory as this script")
                 self.uv_sensor = None
             else:
-                self.uv_sensor = AS7331(1)                
+                self.uv_sensor = AS7331(1)
                 self.uv_sensor.integration_time = INTEGRATION_TIME_256MS
                 self.uv_sensor.gain = GAIN_16X
                 self.uv_sensor.measurement_mode = MEASUREMENT_MODE_CONTINUOUS
@@ -183,7 +183,7 @@ class GeckoController:
             self.uv_sensor.integration_time = INTEGRATION_TIME_256MS
             self.uv_sensor.gain = GAIN_16X
             self.uv_sensor.measurement_mode = MEASUREMENT_MODE_CONTINUOUS
-            
+
         if self.uv_sensor:
             print("UV Sensor (AS7331) ready")
             print(f"  measurement mode: {self.uv_sensor.measurement_mode_as_string}")

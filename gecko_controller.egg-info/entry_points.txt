@@ -1,3 +1,0 @@
-[console_scripts]
-gecko-controller = gecko_controller.controller:main
-gecko-web = gecko_controller.web.app:main
