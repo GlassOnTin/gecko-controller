@@ -9,7 +9,14 @@ def concat_git_files(output_file="all.txt"):
 
     # Filter by extension
     extensions = {".py", ".cpp", ".h", ".i", ".txt", ".md", ".html", ".js", ".toml"}
-    files = [f for f in files if os.path.splitext(f)[1] in extensions]
+    paths = {"debian"}
+    excludes = {"changelog"}
+
+    # Filter files based on extensions, included paths, and excludes
+    files = [f for f in files if
+             (os.path.splitext(f)[1] in extensions or
+              any(f.startswith(path) for path in paths)) and
+             not any(f.startswith(exclude) for exclude in excludes)]
 
     # Write concatenated output
     with open(output_file, "w") as outfile:
