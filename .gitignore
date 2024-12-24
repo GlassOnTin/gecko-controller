@@ -164,3 +164,4 @@ cython_debug/
 
 all.txt
 *.kate-swp
+poetry.*

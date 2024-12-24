@@ -1,69 +1,73 @@
 #!/bin/bash
 
-# Exit on error
-set -e
+# Function to check if we're running with sudo
+check_sudo() {
+    if [ "$EUID" -ne 0 ]; then
+        echo "Please run as root (sudo)"
+        exit 1
+    fi
+}
+
+# Function to get the real user who called sudo
+get_real_user() {
+    if [ -n "$SUDO_USER" ]; then
+        echo "$SUDO_USER"
+    else
+        echo "$USER"
+    fi
+}
+
+# Main installation
+check_sudo
+
+REAL_USER=$(get_real_user)
+REAL_HOME=$(eval echo ~$REAL_USER)
+PROJECT_DIR=$(pwd)
 
 echo "Installing Gecko Controller..."
-
-# Check if running as root
-if [ "$EUID" -ne 0 ]; then
-    echo "Please run as root"
-    exit 1
-fi
 
 # Install system dependencies
 echo "Installing system dependencies..."
 apt-get update
-apt-get install -y \
-    python3-pip \
-    python3-venv \
-    i2c-tools \
-    fonts-symbola \
-    git
+apt-get install -y python3-pip python3-venv i2c-tools fonts-symbola git
 
-# Install Poetry
-echo "Installing Poetry..."
-curl -sSL https://install.python-poetry.org | python3 -
-
-# Create directories
+# Create required directories
 echo "Creating required directories..."
 mkdir -p /etc/gecko-controller
 mkdir -p /var/log/gecko-controller
-chmod 755 /etc/gecko-controller
-chmod 755 /var/log/gecko-controller
+chown -R $REAL_USER:$REAL_USER /var/log/gecko-controller
 
-# Install the package
+# Fix ownership of the project directory
+echo "Setting correct permissions..."
+chown -R $REAL_USER:$REAL_USER "$PROJECT_DIR"
+
+# Create and setup virtualenv as the real user
+echo "Setting up Python virtual environment..."
+runuser -u $REAL_USER -- python3 -m venv venv
+source venv/bin/activate
+
+# Install pip and poetry as the real user
+echo "Installing pip and poetry..."
+runuser -u $REAL_USER -- venv/bin/pip install --upgrade pip
+runuser -u $REAL_USER -- venv/bin/pip install poetry
+
+# Store current keyring backend
+OLD_KEYRING_BACKEND=$PYTHON_KEYRING_BACKEND
+
+# Set keyring to null for poetry commands
+export PYTHON_KEYRING_BACKEND=keyring.backends.null.Keyring
+
+# Run poetry commands as the real user with proper directory ownership
 echo "Installing Gecko Controller package..."
-poetry config virtualenvs.create false
-poetry install
+cd "$PROJECT_DIR"
+runuser -u $REAL_USER -- bash -c "cd '$PROJECT_DIR' && venv/bin/poetry cache clear . --all"
+runuser -u $REAL_USER -- bash -c "cd '$PROJECT_DIR' && venv/bin/poetry install --only main"
+runuser -u $REAL_USER -- bash -c "cd '$PROJECT_DIR' && venv/bin/poetry build"
 
-# Copy config file if it doesn't exist
-if [ ! -f /etc/gecko-controller/config.py ]; then
-    echo "Installing default configuration..."
-    cp config.py /etc/gecko-controller/
-    chmod 644 /etc/gecko-controller/config.py
-fi
+# Restore original keyring backend
+export PYTHON_KEYRING_BACKEND=$OLD_KEYRING_BACKEND
 
-# Install and enable systemd services
-echo "Installing systemd services..."
-cp debian/gecko-controller.service /lib/systemd/system/
-cp debian/gecko-web.service /lib/systemd/system/
-systemctl daemon-reload
-systemctl enable gecko-controller
-systemctl enable gecko-web
-
-# Enable I2C if not already enabled
-if ! grep -q "^dtparam=i2c_arm=on" /boot/config.txt; then
-    echo "Enabling I2C..."
-    echo "dtparam=i2c_arm=on" >> /boot/config.txt
-fi
-
-# Start services
-echo "Starting services..."
-systemctl start gecko-controller
-systemctl start gecko-web
+# Final permission cleanup
+chown -R $REAL_USER:$REAL_USER "$PROJECT_DIR"
 
 echo "Installation complete!"
-echo "The web interface should be available at http://localhost"
-echo "Check service status with: systemctl status gecko-controller"
-echo "View logs with: journalctl -u gecko-controller -f"

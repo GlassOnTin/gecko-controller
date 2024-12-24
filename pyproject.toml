@@ -8,7 +8,7 @@ packages = [{include = "gecko_controller"}]
 
 [tool.poetry.dependencies]
 python = "^3.9"
-RPi.GPIO = "^0.7.1"
+"RPi.GPIO" = "^0.7.1"
 smbus2 = "^0.4.3"
 Pillow = "^10.2.0"
 Flask = "^3.0.0"
@@ -21,10 +21,3 @@ gecko-web = "gecko_controller.web.app:main"
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
-
-[tool.poetry.package]
-include = [
-    "gecko_controller/web/templates/*",
-    "gecko_controller/web/static/*",
-    "gecko_controller/as7331.py",
-]

@@ -155,34 +155,8 @@ class GeckoController:
         print(f"Sensor Position: {SENSOR_HEIGHT}m height, {LAMP_DIST_FROM_BACK}m from back")
         print(f"Lamp Height: {ENCLOSURE_HEIGHT}m, Sensor Angle: {SENSOR_ANGLE}°\n")
 
-        # UV sensor configuration with fallback paths
-        try:
-            # First try relative import (when installed as package)
-            from .as7331 import AS7331, INTEGRATION_TIME_256MS, GAIN_16X, MEASUREMENT_MODE_CONTINUOUS
-        except ImportError:
-            try:
-                # Try importing from the same directory as this script
-                import os
-                import sys
-                script_dir = os.path.dirname(os.path.abspath(__file__))
-                sys.path.append(script_dir)
-                from as7331 import AS7331, INTEGRATION_TIME_256MS, GAIN_16X, MEASUREMENT_MODE_CONTINUOUS
-                print("Imported UV sensor (as7331) module ok")
-            except ImportError:
-                print("Warning: UV sensor module (AS7331) not found. UV sensing disabled")
-                print(f"Looked in: {script_dir}")
-                print("Make sure as7331.py is in the same directory as this script")
-                self.uv_sensor = None
-            else:
-                self.uv_sensor = AS7331(1)
-                self.uv_sensor.integration_time = INTEGRATION_TIME_256MS
-                self.uv_sensor.gain = GAIN_16X
-                self.uv_sensor.measurement_mode = MEASUREMENT_MODE_CONTINUOUS
-        else:
-            self.uv_sensor = AS7331(1)
-            self.uv_sensor.integration_time = INTEGRATION_TIME_256MS
-            self.uv_sensor.gain = GAIN_16X
-            self.uv_sensor.measurement_mode = MEASUREMENT_MODE_CONTINUOUS
+        # In the GeckoController class __init__, replace the UV sensor setup with:
+        self.uv_sensor, self.int_time, self.gain, self.meas_mode = setup_uv_sensor()
 
         if self.uv_sensor:
             print("UV Sensor (AS7331) ready")
@@ -214,6 +188,43 @@ class GeckoController:
         self.ICON_TOO_LOW = "🌜"     
         self.ICON_TOO_HIGH = "⚠"    
         self.ICON_ERROR = "?"
+
+    def setup_uv_sensor():
+        """Set up the UV sensor with Poetry-aware import paths"""
+        try:
+            # With Poetry, we can directly import from the package
+            from gecko_controller.as7331 import (
+                AS7331,
+                INTEGRATION_TIME_256MS,
+                GAIN_16X,
+                MEASUREMENT_MODE_CONTINUOUS
+            )
+
+            try:
+                uv_sensor = AS7331(1)  # Initialize with I2C bus 1
+                uv_sensor.integration_time = INTEGRATION_TIME_256MS
+                uv_sensor.gain = GAIN_16X
+                uv_sensor.measurement_mode = MEASUREMENT_MODE_CONTINUOUS
+
+                print("\nUV Sensor (AS7331) initialized successfully")
+                print(f"  measurement mode: {uv_sensor.measurement_mode_as_string}")
+                print(f"  standby state:    {uv_sensor.standby_state}")
+
+                return uv_sensor, INTEGRATION_TIME_256MS, GAIN_16X, MEASUREMENT_MODE_CONTINUOUS
+
+            except Exception as e:
+                print(f"\nError initializing UV sensor hardware: {str(e)}")
+                print("Please check your I2C connections and addresses")
+                return None, None, None, None
+
+        except ImportError as e:
+            print("\nWarning: UV sensor module (AS7331) not found")
+            print(f"Error: {str(e)}")
+            print("\nPossible fixes:")
+            print("1. Ensure gecko_controller/as7331.py exists")
+            print("2. Run 'poetry install' to reinstall the package")
+            print("3. Check that Poetry's virtual environment is active")
+            return None, None, None, None
 
     @staticmethod
     def parse_time_setting(time_str: str) -> datetime_time:
