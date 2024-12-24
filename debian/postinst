@@ -1,28 +1,33 @@
 #!/bin/sh
+# Rerun this script under bash
+if [ "x$BASH" = x ]; then
+    exec /bin/bash "$0" "$@"
+fi
+
 set -e
 
+# Define variables
 VENV_DIR="/opt/gecko-controller/venv"
 LOG_FILE="/var/log/gecko-controller-install.log"
 
+# Define helper functions first, before any usage
 log() {
-    echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" | tee -a "$LOG_FILE"
+    local message="$1"
+    local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    echo "$timestamp - $message" >> "$LOG_FILE"
+    echo "$timestamp - $message"
 }
 
-get_python_version() {
-    "$VENV_DIR/bin/python3" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")'
-}
+# Create log directory if it doesn't exist
+mkdir -p "$(dirname "$LOG_FILE")"
 
 case "$1" in
     configure)
-        log "Starting gecko-controller installation on $(uname -n)"
+        log "Starting gecko-controller installation"
 
         # Create virtual environment
         log "Creating virtual environment in $VENV_DIR"
         python3 -m venv "$VENV_DIR"
-
-        # Get Python version for site-packages path
-        PYTHON_VERSION=$(get_python_version)
-        log "Detected Python version: $PYTHON_VERSION"
 
         # Upgrade pip and install wheel
         log "Upgrading pip and installing wheel"
@@ -34,15 +39,10 @@ case "$1" in
             'RPi.GPIO' \
             'smbus2' \
             'Pillow' \
-            'Flask'
+            'Flask>=2.2.2' \
+            'adafruit-circuitpython-busdevice'
 
-        # Verify installations
-        log "Verifying installations"
-        installed_packages=$("$VENV_DIR/bin/pip" freeze)
-        echo "Installed packages:" | tee -a "$LOG_FILE"
-        echo "$installed_packages" | tee -a "$LOG_FILE"
-
-        # Enable and start the service
+        # Configure systemd service
         log "Configuring systemd service"
         systemctl daemon-reload
 

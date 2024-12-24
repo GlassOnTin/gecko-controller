@@ -1,0 +1,419 @@
+Looking in indexes: https://pypi.org/simple, https://www.piwheels.org/simple
+Requirement already satisfied: pytest in ./venv/lib/python3.11/site-packages (8.3.4)
+Requirement already satisfied: pytest-timeout in ./venv/lib/python3.11/site-packages (2.3.1)
+Requirement already satisfied: iniconfig in ./venv/lib/python3.11/site-packages (from pytest) (2.0.0)
+Requirement already satisfied: packaging in ./venv/lib/python3.11/site-packages (from pytest) (24.2)
+Requirement already satisfied: pluggy<2,>=1.5 in ./venv/lib/python3.11/site-packages (from pytest) (1.5.0)
+============================= test session starts ==============================
+platform linux -- Python 3.11.2, pytest-8.3.4, pluggy-1.5.0 -- /home/ian/gecko-controller/venv/bin/python3
+cachedir: .pytest_cache
+rootdir: /home/ian/gecko-controller
+configfile: pyproject.toml
+plugins: timeout-2.3.1
+collecting ... collected 6 items
+
+tests/hardware/test_gpio.py::test_light_relay PASSED                     [ 16%]
+tests/hardware/test_gpio.py::test_heat_relay PASSED                      [ 33%]
+tests/hardware/test_i2c.py::test_i2c_devices FAILED                      [ 50%]
+tests/hardware/test_sensor_readings.py::test_temperature_reading ERROR   [ 66%]
+tests/hardware/test_sensor_readings.py::test_humidity_reading ERROR      [ 83%]
+tests/hardware/test_sensor_readings.py::test_uv_reading ERROR            [100%]
+
+==================================== ERRORS ====================================
+__________________ ERROR at setup of test_temperature_reading __________________
+
+    @pytest.fixture(scope="module")
+    def controller():
+        """Create a controller instance for testing"""
+>       return GeckoController()
+
+tests/hardware/test_sensor_readings.py:7: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <gecko_controller.controller.GeckoController object at 0x7fbadc3e90>
+
+    def __init__(self):
+        # GPIO Setup
+        GPIO.setmode(GPIO.BCM)
+        GPIO.setup(LIGHT_RELAY, GPIO.OUT)
+        GPIO.setup(HEAT_RELAY, GPIO.OUT)
+    
+        if hasattr(self, 'DISPLAY_RESET'):
+            GPIO.setup(DISPLAY_RESET, GPIO.OUT)
+            GPIO.output(DISPLAY_RESET, GPIO.HIGH)  # Start with reset inactive
+    
+        self.setup_display()
+        self.setup_logging()
+        self.last_log_time = 0
+        self.bus = smbus2.SMBus(1)
+    
+        # Convert time settings from config to datetime.time objects
+        self.light_on_time = self.parse_time_setting(LIGHT_ON_TIME)
+        self.light_off_time = self.parse_time_setting(LIGHT_OFF_TIME)
+        print(f"Light on @ {self.light_on_time}, Light off @ {self.light_off_time}\n")
+    
+        # Use thresholds from config
+        self.UVA_THRESHOLDS = UVA_THRESHOLDS
+        self.UVB_THRESHOLDS = UVB_THRESHOLDS
+        print(f"UVA Thresholds = {self.UVA_THRESHOLDS}, UVB Thresholds = {self.UVB_THRESHOLDS}\n")
+    
+        # Calculate UV correction factor
+        self.uv_correction_factor = self.calculate_uv_correction()
+        print(f"\nUV Correction Factor: {self.uv_correction_factor:.3f}")
+        print(f"Sensor Position: {SENSOR_HEIGHT}m height, {LAMP_DIST_FROM_BACK}m from back")
+        print(f"Lamp Height: {ENCLOSURE_HEIGHT}m, Sensor Angle: {SENSOR_ANGLE}°\n")
+    
+        # In the GeckoController class __init__, replace the UV sensor setup with:
+>       self.uv_sensor, self.int_time, self.gain, self.meas_mode = setup_uv_sensor()
+E       NameError: name 'setup_uv_sensor' is not defined
+
+gecko_controller/controller.py:159: NameError
+---------------------------- Captured stdout setup -----------------------------
+Light on @ 07:30:00, Light off @ 19:30:00
+
+UVA Thresholds = {'low': 50.0, 'high': 100.0}, UVB Thresholds = {'low': 2.0, 'high': 5.0}
+
+
+UV Correction Factor: 2.828
+Sensor Position: 0.2m height, 0.3m from back
+Lamp Height: 0.5m, Sensor Angle: 90°
+
+___________________ ERROR at setup of test_humidity_reading ____________________
+
+    @pytest.fixture(scope="module")
+    def controller():
+        """Create a controller instance for testing"""
+>       return GeckoController()
+
+tests/hardware/test_sensor_readings.py:7: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <gecko_controller.controller.GeckoController object at 0x7fbadc3e90>
+
+    def __init__(self):
+        # GPIO Setup
+        GPIO.setmode(GPIO.BCM)
+        GPIO.setup(LIGHT_RELAY, GPIO.OUT)
+        GPIO.setup(HEAT_RELAY, GPIO.OUT)
+    
+        if hasattr(self, 'DISPLAY_RESET'):
+            GPIO.setup(DISPLAY_RESET, GPIO.OUT)
+            GPIO.output(DISPLAY_RESET, GPIO.HIGH)  # Start with reset inactive
+    
+        self.setup_display()
+        self.setup_logging()
+        self.last_log_time = 0
+        self.bus = smbus2.SMBus(1)
+    
+        # Convert time settings from config to datetime.time objects
+        self.light_on_time = self.parse_time_setting(LIGHT_ON_TIME)
+        self.light_off_time = self.parse_time_setting(LIGHT_OFF_TIME)
+        print(f"Light on @ {self.light_on_time}, Light off @ {self.light_off_time}\n")
+    
+        # Use thresholds from config
+        self.UVA_THRESHOLDS = UVA_THRESHOLDS
+        self.UVB_THRESHOLDS = UVB_THRESHOLDS
+        print(f"UVA Thresholds = {self.UVA_THRESHOLDS}, UVB Thresholds = {self.UVB_THRESHOLDS}\n")
+    
+        # Calculate UV correction factor
+        self.uv_correction_factor = self.calculate_uv_correction()
+        print(f"\nUV Correction Factor: {self.uv_correction_factor:.3f}")
+        print(f"Sensor Position: {SENSOR_HEIGHT}m height, {LAMP_DIST_FROM_BACK}m from back")
+        print(f"Lamp Height: {ENCLOSURE_HEIGHT}m, Sensor Angle: {SENSOR_ANGLE}°\n")
+    
+        # In the GeckoController class __init__, replace the UV sensor setup with:
+>       self.uv_sensor, self.int_time, self.gain, self.meas_mode = setup_uv_sensor()
+E       NameError: name 'setup_uv_sensor' is not defined
+
+gecko_controller/controller.py:159: NameError
+______________________ ERROR at setup of test_uv_reading _______________________
+
+    @pytest.fixture(scope="module")
+    def controller():
+        """Create a controller instance for testing"""
+>       return GeckoController()
+
+tests/hardware/test_sensor_readings.py:7: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <gecko_controller.controller.GeckoController object at 0x7fbadc3e90>
+
+    def __init__(self):
+        # GPIO Setup
+        GPIO.setmode(GPIO.BCM)
+        GPIO.setup(LIGHT_RELAY, GPIO.OUT)
+        GPIO.setup(HEAT_RELAY, GPIO.OUT)
+    
+        if hasattr(self, 'DISPLAY_RESET'):
+            GPIO.setup(DISPLAY_RESET, GPIO.OUT)
+            GPIO.output(DISPLAY_RESET, GPIO.HIGH)  # Start with reset inactive
+    
+        self.setup_display()
+        self.setup_logging()
+        self.last_log_time = 0
+        self.bus = smbus2.SMBus(1)
+    
+        # Convert time settings from config to datetime.time objects
+        self.light_on_time = self.parse_time_setting(LIGHT_ON_TIME)
+        self.light_off_time = self.parse_time_setting(LIGHT_OFF_TIME)
+        print(f"Light on @ {self.light_on_time}, Light off @ {self.light_off_time}\n")
+    
+        # Use thresholds from config
+        self.UVA_THRESHOLDS = UVA_THRESHOLDS
+        self.UVB_THRESHOLDS = UVB_THRESHOLDS
+        print(f"UVA Thresholds = {self.UVA_THRESHOLDS}, UVB Thresholds = {self.UVB_THRESHOLDS}\n")
+    
+        # Calculate UV correction factor
+        self.uv_correction_factor = self.calculate_uv_correction()
+        print(f"\nUV Correction Factor: {self.uv_correction_factor:.3f}")
+        print(f"Sensor Position: {SENSOR_HEIGHT}m height, {LAMP_DIST_FROM_BACK}m from back")
+        print(f"Lamp Height: {ENCLOSURE_HEIGHT}m, Sensor Angle: {SENSOR_ANGLE}°\n")
+    
+        # In the GeckoController class __init__, replace the UV sensor setup with:
+>       self.uv_sensor, self.int_time, self.gain, self.meas_mode = setup_uv_sensor()
+E       NameError: name 'setup_uv_sensor' is not defined
+
+gecko_controller/controller.py:159: NameError
+=================================== FAILURES ===================================
+_______________________________ test_i2c_devices _______________________________
+
+    def test_i2c_devices():
+        """Test that all expected I2C devices are present and responding"""
+        bus = smbus2.SMBus(1)
+    
+        # Test OLED Display
+        try:
+            bus.write_byte(0x3c, 0)
+            assert True, "OLED display found"
+        except:
+            pytest.fail("OLED display not responding at 0x3c")
+    
+        # Test Temperature/Humidity Sensor
+        try:
+>           bus.write_byte(0x44, 0)
+
+tests/hardware/test_i2c.py:17: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <smbus2.smbus2.SMBus object at 0x7fbad8a310>, i2c_addr = 68, value = 0
+force = None
+
+    def write_byte(self, i2c_addr, value, force=None):
+        """
+        Write a single byte to a device.
+    
+        :param i2c_addr: i2c address
+        :type i2c_addr: int
+        :param value: value to write
+        :type value: int
+        :param force:
+        :type force: Boolean
+        """
+        self._set_address(i2c_addr, force=force)
+        msg = i2c_smbus_ioctl_data.create(
+            read_write=I2C_SMBUS_WRITE, command=value, size=I2C_SMBUS_BYTE
+        )
+>       ioctl(self.fd, I2C_SMBUS, msg)
+E       OSError: [Errno 5] Input/output error
+
+venv/lib/python3.11/site-packages/smbus2/smbus2.py:414: OSError
+
+During handling of the above exception, another exception occurred:
+
+    def test_i2c_devices():
+        """Test that all expected I2C devices are present and responding"""
+        bus = smbus2.SMBus(1)
+    
+        # Test OLED Display
+        try:
+            bus.write_byte(0x3c, 0)
+            assert True, "OLED display found"
+        except:
+            pytest.fail("OLED display not responding at 0x3c")
+    
+        # Test Temperature/Humidity Sensor
+        try:
+            bus.write_byte(0x44, 0)
+            assert True, "SHT31 sensor found"
+        except:
+>           pytest.fail("SHT31 not responding at 0x44")
+E           Failed: SHT31 not responding at 0x44
+
+tests/hardware/test_i2c.py:20: Failed
+=============================== warnings summary ===============================
+tests/hardware/test_gpio.py::test_light_relay
+  /home/ian/gecko-controller/tests/hardware/test_gpio.py:15: RuntimeWarning: This channel is already in use, continuing anyway.  Use GPIO.setwarnings(False) to disable warnings.
+    GPIO.setup(LIGHT_RELAY, GPIO.OUT)
+
+tests/hardware/test_gpio.py::test_heat_relay
+  /home/ian/gecko-controller/tests/hardware/test_gpio.py:29: RuntimeWarning: This channel is already in use, continuing anyway.  Use GPIO.setwarnings(False) to disable warnings.
+    GPIO.setup(HEAT_RELAY, GPIO.OUT)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/hardware/test_i2c.py::test_i2c_devices - Failed: SHT31 not respo...
+ERROR tests/hardware/test_sensor_readings.py::test_temperature_reading - Name...
+ERROR tests/hardware/test_sensor_readings.py::test_humidity_reading - NameErr...
+ERROR tests/hardware/test_sensor_readings.py::test_uv_reading - NameError: na...
+============== 1 failed, 2 passed, 2 warnings, 3 errors in 4.81s ===============
+============================= test session starts ==============================
+platform linux -- Python 3.11.2, pytest-8.3.4, pluggy-1.5.0 -- /home/ian/gecko-controller/venv/bin/python3
+cachedir: .pytest_cache
+rootdir: /home/ian/gecko-controller
+configfile: pyproject.toml
+plugins: timeout-2.3.1
+collecting ... collected 1 item
+
+tests/hardware/test_i2c.py::test_i2c_devices FAILED                      [100%]
+
+=================================== FAILURES ===================================
+_______________________________ test_i2c_devices _______________________________
+
+    def test_i2c_devices():
+        """Test that all expected I2C devices are present and responding"""
+        bus = smbus2.SMBus(1)
+    
+        # Test OLED Display
+        try:
+            bus.write_byte(0x3c, 0)
+            assert True, "OLED display found"
+        except:
+            pytest.fail("OLED display not responding at 0x3c")
+    
+        # Test Temperature/Humidity Sensor
+        try:
+>           bus.write_byte(0x44, 0)
+
+tests/hardware/test_i2c.py:17: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <smbus2.smbus2.SMBus object at 0x7f856de150>, i2c_addr = 68, value = 0
+force = None
+
+    def write_byte(self, i2c_addr, value, force=None):
+        """
+        Write a single byte to a device.
+    
+        :param i2c_addr: i2c address
+        :type i2c_addr: int
+        :param value: value to write
+        :type value: int
+        :param force:
+        :type force: Boolean
+        """
+        self._set_address(i2c_addr, force=force)
+        msg = i2c_smbus_ioctl_data.create(
+            read_write=I2C_SMBUS_WRITE, command=value, size=I2C_SMBUS_BYTE
+        )
+>       ioctl(self.fd, I2C_SMBUS, msg)
+E       OSError: [Errno 5] Input/output error
+
+venv/lib/python3.11/site-packages/smbus2/smbus2.py:414: OSError
+
+During handling of the above exception, another exception occurred:
+
+    def test_i2c_devices():
+        """Test that all expected I2C devices are present and responding"""
+        bus = smbus2.SMBus(1)
+    
+        # Test OLED Display
+        try:
+            bus.write_byte(0x3c, 0)
+            assert True, "OLED display found"
+        except:
+            pytest.fail("OLED display not responding at 0x3c")
+    
+        # Test Temperature/Humidity Sensor
+        try:
+            bus.write_byte(0x44, 0)
+            assert True, "SHT31 sensor found"
+        except:
+>           pytest.fail("SHT31 not responding at 0x44")
+E           Failed: SHT31 not responding at 0x44
+
+tests/hardware/test_i2c.py:20: Failed
+=========================== short test summary info ============================
+FAILED tests/hardware/test_i2c.py::test_i2c_devices - Failed: SHT31 not respo...
+============================== 1 failed in 0.27s ===============================
+============================= test session starts ==============================
+platform linux -- Python 3.11.2, pytest-8.3.4, pluggy-1.5.0 -- /home/ian/gecko-controller/venv/bin/python3
+cachedir: .pytest_cache
+rootdir: /home/ian/gecko-controller
+configfile: pyproject.toml
+plugins: timeout-2.3.1
+collecting ... collected 1 item
+
+tests/hardware/test_sensor_readings.py::test_temperature_reading ERROR   [100%]
+
+==================================== ERRORS ====================================
+__________________ ERROR at setup of test_temperature_reading __________________
+
+    @pytest.fixture(scope="module")
+    def controller():
+        """Create a controller instance for testing"""
+>       return GeckoController()
+
+tests/hardware/test_sensor_readings.py:7: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <gecko_controller.controller.GeckoController object at 0x7f8f97a4d0>
+
+    def __init__(self):
+        # GPIO Setup
+        GPIO.setmode(GPIO.BCM)
+        GPIO.setup(LIGHT_RELAY, GPIO.OUT)
+        GPIO.setup(HEAT_RELAY, GPIO.OUT)
+    
+        if hasattr(self, 'DISPLAY_RESET'):
+            GPIO.setup(DISPLAY_RESET, GPIO.OUT)
+            GPIO.output(DISPLAY_RESET, GPIO.HIGH)  # Start with reset inactive
+    
+        self.setup_display()
+        self.setup_logging()
+        self.last_log_time = 0
+        self.bus = smbus2.SMBus(1)
+    
+        # Convert time settings from config to datetime.time objects
+        self.light_on_time = self.parse_time_setting(LIGHT_ON_TIME)
+        self.light_off_time = self.parse_time_setting(LIGHT_OFF_TIME)
+        print(f"Light on @ {self.light_on_time}, Light off @ {self.light_off_time}\n")
+    
+        # Use thresholds from config
+        self.UVA_THRESHOLDS = UVA_THRESHOLDS
+        self.UVB_THRESHOLDS = UVB_THRESHOLDS
+        print(f"UVA Thresholds = {self.UVA_THRESHOLDS}, UVB Thresholds = {self.UVB_THRESHOLDS}\n")
+    
+        # Calculate UV correction factor
+        self.uv_correction_factor = self.calculate_uv_correction()
+        print(f"\nUV Correction Factor: {self.uv_correction_factor:.3f}")
+        print(f"Sensor Position: {SENSOR_HEIGHT}m height, {LAMP_DIST_FROM_BACK}m from back")
+        print(f"Lamp Height: {ENCLOSURE_HEIGHT}m, Sensor Angle: {SENSOR_ANGLE}°\n")
+    
+        # In the GeckoController class __init__, replace the UV sensor setup with:
+>       self.uv_sensor, self.int_time, self.gain, self.meas_mode = setup_uv_sensor()
+E       NameError: name 'setup_uv_sensor' is not defined
+
+gecko_controller/controller.py:159: NameError
+---------------------------- Captured stdout setup -----------------------------
+Light on @ 07:30:00, Light off @ 19:30:00
+
+UVA Thresholds = {'low': 50.0, 'high': 100.0}, UVB Thresholds = {'low': 2.0, 'high': 5.0}
+
+
+UV Correction Factor: 2.828
+Sensor Position: 0.2m height, 0.3m from back
+Lamp Height: 0.5m, Sensor Angle: 90°
+
+=============================== warnings summary ===============================
+tests/hardware/test_sensor_readings.py::test_temperature_reading
+  /home/ian/gecko-controller/gecko_controller/controller.py:130: RuntimeWarning: This channel is already in use, continuing anyway.  Use GPIO.setwarnings(False) to disable warnings.
+    GPIO.setup(LIGHT_RELAY, GPIO.OUT)
+
+tests/hardware/test_sensor_readings.py::test_temperature_reading
+  /home/ian/gecko-controller/gecko_controller/controller.py:131: RuntimeWarning: This channel is already in use, continuing anyway.  Use GPIO.setwarnings(False) to disable warnings.
+    GPIO.setup(HEAT_RELAY, GPIO.OUT)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+ERROR tests/hardware/test_sensor_readings.py::test_temperature_reading - Name...
+========================= 2 warnings, 1 error in 0.47s =========================

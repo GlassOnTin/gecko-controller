@@ -7,8 +7,13 @@ export DH_VERBOSE=1
 %:
 	dh $@ --with python3 --buildsystem=pybuild
 
+override_dh_auto_build:
+	# Skip poetry build, use direct python build
+	python3 setup.py build
+
 override_dh_auto_install:
-	dh_auto_install
+	python3 setup.py install --root=$(CURDIR)/debian/gecko-controller --install-layout=deb
+	# Install additional files
 	mkdir -p debian/gecko-controller/usr/bin
 	mkdir -p debian/gecko-controller/etc/gecko-controller
 	mkdir -p debian/gecko-controller/lib/systemd/system

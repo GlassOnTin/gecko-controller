@@ -1,0 +1,4 @@
+include README.md
+recursive-include gecko_controller/web/templates *
+recursive-include gecko_controller/web/static *
+recursive-include gecko_controller/fonts *

@@ -5,7 +5,9 @@ Maintainer: Ian Ross Williams <ianrosswilliams@gmail.com>
 Build-Depends: debhelper (>= 10),
                dh-python,
                python3-all,
-               python3-setuptools
+               python3-setuptools,
+               python3-pip,
+               python3-venv
 
 Package: gecko-controller
 Architecture: all
@@ -17,7 +19,7 @@ Depends: ${python3:Depends},
          python3-rpi.gpio,
          python3-pillow,
          python3-smbus,
-         python3-flask,
+         python3-flask (>= 2.2.2),
          i2c-tools
 Description: Raspberry Pi Gecko Vivarium Controller
  Automated environmental controller for gecko vivarium with OLED status
