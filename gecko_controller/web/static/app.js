@@ -1,5 +1,5 @@
-import { LiveDisplay } from './components/LiveDisplay.jsx';
-import { StatusMonitor } from './components/StatusMonitor.jsx';
+import LiveDisplay from './components/LiveDisplay.jsx';
+import StatusMonitor from './components/StatusMonitor.jsx';
 
 // Configuration Management
 class ConfigManager {

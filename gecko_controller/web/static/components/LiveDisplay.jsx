@@ -42,37 +42,37 @@ const LiveDisplay = () => {
   if (error) {
     return (
       <div className="w-full max-w-md mx-auto p-4 text-red-500 text-center">
-        Error: {error}
+      Error: {error}
       </div>
     );
   }
 
   return (
     <div className="w-full max-w-md mx-auto p-4">
-      {displayImage ? (
-        <div
-          className="bg-black rounded-lg p-4 flex items-center justify-center"
-          style={{
-            width: `${width}px`,
-            height: `${height}px`,
-            margin: '0 auto'
-          }}
-        >
-          <img
-            src={`data:image/png;base64,${displayImage}`}
-            alt="OLED Display"
-            style={{
-              width: '100%',
-              height: '100%',
-              imageRendering: 'pixelated'  // Keep pixels sharp when scaling
-            }}
-          />
-        </div>
-      ) : (
-        <div className="w-full h-32 flex items-center justify-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-gray-900"></div>
-        </div>
-      )}
+    {displayImage ? (
+      <div
+      className="bg-black rounded-lg p-4 flex items-center justify-center"
+      style={{
+        width: `${width}px`,
+        height: `${height}px`,
+        margin: '0 auto'
+      }}
+      >
+      <img
+      src={`data:image/png;base64,${displayImage}`}
+      alt="OLED Display"
+      style={{
+        width: '100%',
+        height: '100%',
+        imageRendering: 'pixelated'
+      }}
+      />
+      </div>
+    ) : (
+      <div className="w-full h-32 flex items-center justify-center">
+      <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-gray-900"></div>
+      </div>
+    )}
     </div>
   );
 };

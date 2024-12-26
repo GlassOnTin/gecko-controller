@@ -14,6 +14,9 @@ if [ "$EUID" -ne 0 ]; then
     exit 1
 fi
 
+# Get the absolute path to the project root (where this script is located)
+PROJECT_ROOT="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+
 # Install system dependencies
 log "Installing system dependencies..."
 apt-get update
@@ -55,13 +58,13 @@ npm run build:prod
 # Install configuration file if it doesn't exist
 if [ ! -f "/etc/gecko-controller/config.py" ]; then
     log "Installing default configuration..."
-    cp debian/config.py /etc/gecko-controller/
+    cp "${PROJECT_ROOT}/debian/config.py" /etc/gecko-controller/
 fi
 
 # Install systemd services
 log "Installing systemd services..."
-cp debian/gecko-controller.service /etc/systemd/system/
-cp debian/gecko-web.service /etc/systemd/system/
+cp "${PROJECT_ROOT}/debian/gecko-controller.service" /etc/systemd/system/
+cp "${PROJECT_ROOT}/debian/gecko-web.service" /etc/systemd/system/
 
 # Reload systemd
 log "Reloading systemd..."
@@ -79,10 +82,7 @@ systemctl start gecko-web
 
 # Configure I2C
 log "Configuring I2C..."
-if ! grep -q "^dtparam=i2c_arm=on" /boot/config.txt; then
-    echo "dtparam=i2c_arm=on,i2c_arm_baudrate=10000" >> /boot/config.txt
-    log "I2C enabled in /boot/config.txt"
-fi
+sh -c "${PROJECT_ROOT}/set_i2c_baud.sh"
 
 log "Installation complete!"
 log "Please check service status with: systemctl status gecko-controller"
