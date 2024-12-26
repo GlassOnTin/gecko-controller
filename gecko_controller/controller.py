@@ -55,73 +55,161 @@ class SSH1106Display:
         self.height = height
         self.pages = height // 8
         self.buffer = [0] * (width * self.pages)
+
+        print(f"Initializing SSH1106 Display on i2c address 0x{i2c_addr:02x}")
+        print(f"Display size: {width}x{height} in {self.pages} pages")
+
         self.bus = smbus2.SMBus(1)
+        time.sleep(0.1)  # Wait after bus initialization
         self.init_display()
 
     def init_display(self):
-        """Initialize the SSH1106 display with correct rotation"""
-        init_sequence = [
-            0xAE,   # display off
-            0xD5, 0x80,  # set display clock
-            0xA8, 0x3F,  # set multiplex ratio
-            0xD3, 0x00,  # set display offset
-            0x40,   # set start line to 0
-            0x8D, 0x14,  # enable charge pump
-            0x20, 0x00,  # memory addressing mode
-            0xA0,   # segment remap (0xA1 to flip horizontal)
-            0xC0,   # COM scan direction (0xC8 to flip vertical)
-            0xDA, 0x12,  # set COM pins
-            0x81, 0xFF,  # maximum contrast
-            0xD9, 0xF1,  # set pre-charge period
-            0xDB, 0x20,  # set VCOMH
-            0xA4,   # display all on resume
-            0xA6,   # normal display (not inverted)
-            0xAF    # display on
-        ]
-        for cmd in init_sequence:
-            self.write_cmd(cmd)
+        """Initialize the SSH1106 display with delays between commands"""
+        print("\nInitializing display...")
+
+        # Turn display off first
+        self.write_cmd(0xAE)
+        time.sleep(0.001)  # 1ms delay
+
+        # Set display clock div
+        self.write_cmd(0xD5)
+        time.sleep(0.001)
+        self.write_cmd(0x80)
+        time.sleep(0.001)
+
+        # Set multiplex
+        self.write_cmd(0xA8)
+        time.sleep(0.001)
+        self.write_cmd(0x3F)
+        time.sleep(0.001)
+
+        # Set display offset
+        self.write_cmd(0xD3)
+        time.sleep(0.001)
+        self.write_cmd(0x00)
+        time.sleep(0.001)
+
+        # Set start line
+        self.write_cmd(0x40)
+        time.sleep(0.001)
+
+        # Enable charge pump
+        self.write_cmd(0x8D)
+        time.sleep(0.001)
+        self.write_cmd(0x14)
+        time.sleep(0.001)
+
+        # Memory mode
+        self.write_cmd(0x20)
+        time.sleep(0.001)
+        self.write_cmd(0x00)
+        time.sleep(0.001)
+
+        # Seg remap
+        self.write_cmd(0xA1)
+        time.sleep(0.001)
+
+        # COM scan direction
+        self.write_cmd(0xC8)
+        time.sleep(0.001)
+
+        # Set COM pins
+        self.write_cmd(0xDA)
+        time.sleep(0.001)
+        self.write_cmd(0x12)
+        time.sleep(0.001)
+
+        # Set contrast
+        self.write_cmd(0x81)
+        time.sleep(0.001)
+        self.write_cmd(0xFF)
+        time.sleep(0.001)
+
+        # Set precharge
+        self.write_cmd(0xD9)
+        time.sleep(0.001)
+        self.write_cmd(0xF1)
+        time.sleep(0.001)
+
+        # Set VCOMH
+        self.write_cmd(0xDB)
+        time.sleep(0.001)
+        self.write_cmd(0x20)
+        time.sleep(0.001)
+
+        # Set normal display
+        self.write_cmd(0xA4)
+        time.sleep(0.001)
+        self.write_cmd(0xA6)
+        time.sleep(0.001)
+
+        # Turn display on
+        self.write_cmd(0xAF)
+        time.sleep(0.1)  # Longer delay after turning display on
+
+        print("Display initialization complete")
 
     def show_image(self, image: Image.Image):
         """Display a PIL Image object"""
-        # Convert image to 1-bit color and rotate if needed
-        if image.mode != '1':
-            image = image.convert('1')
-        
-        # Rotate image 90 degrees clockwise
-        image = image.rotate(180, expand=True)
-        
-        # The SSH1106 has a 132x64 display memory, but only 128x64 is visible
-        # Create a new image with the full 132x64 size
-        full_image = Image.new('1', (132, 64), 255)  # white background
-        
-        # Paste the rotated image in the center of the 132x64 frame
-        paste_x = (132 - image.width) // 2
-        paste_y = (64 - image.height) // 2
-        full_image.paste(image, (paste_x, paste_y))
-        
-        # Set the correct position for the SSH1106
-        self.write_cmd(0x02)  # Set lower column address (to center the 128 columns in 132 width)
-        self.write_cmd(0x10)  # Set higher column address
-        
-        # Write display buffer
-        for page in range(self.pages):
-            self.write_cmd(0xB0 + page)  # Set page address
-            for x in range(132):  # Write all 132 columns
-                bits = 0
-                for bit in range(8):
-                    y = page * 8 + bit
-                    if y < 64 and x < 132:
-                        if full_image.getpixel((x, y)) == 0:  # Black pixel
-                            bits |= (1 << bit)
-                self.write_data(bits)
+        try:
+            # Convert image to 1-bit color and rotate if needed
+            if image.mode != '1':
+                image = image.convert('1')
+
+            # No rotation needed - remove the 180 degree rotation
+            # image = image.rotate(180, expand=True)
+
+            # Create a new image with the full 132x64 size
+            full_image = Image.new('1', (132, 64), 255)  # white background
+
+            # Paste the rotated image in the center
+            paste_x = (132 - image.width) // 2
+            paste_y = (64 - image.height) // 2
+            full_image.paste(image, (paste_x, paste_y))
+
+            # Reset the display position
+            self.write_cmd(0x02)  # Set lower column address
+            self.write_cmd(0x10)  # Set higher column address
+
+            # Write display buffer one page at a time
+            for page in range(self.pages):
+                self.write_cmd(0xB0 + page)  # Set page address
+                time.sleep(0.001)  # Small delay after page command
+
+                for x in range(132):  # Write all 132 columns
+                    # Collect 8 vertical pixels for this column
+                    bits = 0
+                    for bit in range(8):
+                        y = page * 8 + bit
+                        if y < 64 and x < 132:
+                            if full_image.getpixel((x, y)) == 0:  # Black pixel
+                                bits |= (1 << bit)
+
+                    # Write the data byte
+                    self.write_data(bits)
+                    time.sleep(0.0001)  # Small delay between columns
+
+                time.sleep(0.001)  # Small delay between pages
+
+        except Exception as e:
+            print(f"Error in show_image: {e}")
+            raise
 
     def write_cmd(self, cmd: int):
         """Write a command to the display"""
-        self.bus.write_byte_data(self.addr, 0x00, cmd)
+        try:
+            self.bus.write_byte_data(self.addr, 0x00, cmd)
+        except Exception as e:
+            print(f"Error writing command 0x{cmd:02X}: {e}")
+            raise
 
     def write_data(self, data: int):
         """Write data to the display"""
-        self.bus.write_byte_data(self.addr, 0x40, data)
+        try:
+            self.bus.write_byte_data(self.addr, 0x40, data)
+        except Exception as e:
+            print(f"Error writing data 0x{data:02X}: {e}")
+            raise
 
 class GeckoController:
     def __init__(self):
@@ -155,8 +243,9 @@ class GeckoController:
         print(f"Sensor Position: {SENSOR_HEIGHT}m height, {LAMP_DIST_FROM_BACK}m from back")
         print(f"Lamp Height: {ENCLOSURE_HEIGHT}m, Sensor Angle: {SENSOR_ANGLE}°\n")
 
-        # In the GeckoController class __init__, replace the UV sensor setup with:
-        self.uv_sensor, self.int_time, self.gain, self.meas_mode = setup_uv_sensor()
+        # Setup UV sensor
+        self.uv_sensor = None
+        self.setup_uv_sensor()
 
         if self.uv_sensor:
             print("UV Sensor (AS7331) ready")
@@ -188,9 +277,6 @@ class GeckoController:
         self.ICON_TOO_LOW = "🌜"     
         self.ICON_TOO_HIGH = "⚠"    
         self.ICON_ERROR = "?"
-
-       # Setup UV sensor
-        self.setup_uv_sensor()
 
     def setup_uv_sensor(self):
         """Set up the UV sensor with appropriate configuration"""

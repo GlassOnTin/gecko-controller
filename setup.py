@@ -10,6 +10,7 @@ setup(
         "smbus2>=0.4.3",
         "Pillow>=10.2.0",
         "Flask>=2.2.2",
+	"pytest>=8.3.4",
         "adafruit-circuitpython-busdevice>=5.2.6",
     ],
     entry_points={
