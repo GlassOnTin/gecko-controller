@@ -2,10 +2,11 @@ from setuptools import setup, find_packages
 
 setup(
     name="gecko-controller",
-    version="0.7.7",
+    version="0.7.8",
     packages=find_packages(),
     install_requires=[
         "RPi.GPIO>=0.7.1",
+        "smbus>=1.1.post2",
         "smbus2>=0.4.3",
         "Pillow>=10.2.0",
         "Flask>=2.2.2",

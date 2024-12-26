@@ -1,3 +1,9 @@
+gecko-controller (0.7.8) stable; urgency=medium
+
+  * Bump version to 0.7.8
+
+ -- GlassOnTin <63980135+GlassOnTin@users.noreply.github.com>  Thu, 26 Dec 2024 19:27:41 +0000
+
 gecko-controller (0.7.7) stable; urgency=medium
 
   * Fixed pip imports

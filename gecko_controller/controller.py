@@ -189,10 +189,12 @@ class GeckoController:
         self.ICON_TOO_HIGH = "⚠"    
         self.ICON_ERROR = "?"
 
-    def setup_uv_sensor():
-        """Set up the UV sensor with Poetry-aware import paths"""
+       # Setup UV sensor
+        self.setup_uv_sensor()
+
+    def setup_uv_sensor(self):
+        """Set up the UV sensor with appropriate configuration"""
         try:
-            # With Poetry, we can directly import from the package
             from gecko_controller.as7331 import (
                 AS7331,
                 INTEGRATION_TIME_256MS,
@@ -201,30 +203,34 @@ class GeckoController:
             )
 
             try:
-                uv_sensor = AS7331(1)  # Initialize with I2C bus 1
-                uv_sensor.integration_time = INTEGRATION_TIME_256MS
-                uv_sensor.gain = GAIN_16X
-                uv_sensor.measurement_mode = MEASUREMENT_MODE_CONTINUOUS
+                self.uv_sensor = AS7331(1)  # Initialize with I2C bus 1
+                self.uv_sensor.integration_time = INTEGRATION_TIME_256MS
+                self.uv_sensor.gain = GAIN_16X
+                self.uv_sensor.measurement_mode = MEASUREMENT_MODE_CONTINUOUS
+
+                self.int_time = INTEGRATION_TIME_256MS
+                self.gain = GAIN_16X
+                self.meas_mode = MEASUREMENT_MODE_CONTINUOUS
 
                 print("\nUV Sensor (AS7331) initialized successfully")
-                print(f"  measurement mode: {uv_sensor.measurement_mode_as_string}")
-                print(f"  standby state:    {uv_sensor.standby_state}")
-
-                return uv_sensor, INTEGRATION_TIME_256MS, GAIN_16X, MEASUREMENT_MODE_CONTINUOUS
+                print(f"  measurement mode: {self.uv_sensor.measurement_mode_as_string}")
+                print(f"  standby state:    {self.uv_sensor.standby_state}")
 
             except Exception as e:
                 print(f"\nError initializing UV sensor hardware: {str(e)}")
                 print("Please check your I2C connections and addresses")
-                return None, None, None, None
+                self.uv_sensor = None
+                self.int_time = None
+                self.gain = None
+                self.meas_mode = None
 
         except ImportError as e:
             print("\nWarning: UV sensor module (AS7331) not found")
             print(f"Error: {str(e)}")
-            print("\nPossible fixes:")
-            print("1. Ensure gecko_controller/as7331.py exists")
-            print("2. Run 'poetry install' to reinstall the package")
-            print("3. Check that Poetry's virtual environment is active")
-            return None, None, None, None
+            self.uv_sensor = None
+            self.int_time = None
+            self.gain = None
+            self.meas_mode = None
 
     @staticmethod
     def parse_time_setting(time_str: str) -> datetime_time:
