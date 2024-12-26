@@ -8,8 +8,12 @@ export DH_VERBOSE=1
 	dh $@ --with python3 --buildsystem=pybuild
 
 override_dh_auto_build:
-	# Skip poetry build, use direct python build
+	# Build Python package
 	python3 setup.py build
+	# Build JavaScript
+	cd gecko_controller/web/static && \
+	npm install && \
+	npm run build:prod
 
 override_dh_auto_install:
 	python3 setup.py install --root=$(CURDIR)/debian/gecko-controller --install-layout=deb
@@ -17,6 +21,8 @@ override_dh_auto_install:
 	mkdir -p debian/gecko-controller/usr/bin
 	mkdir -p debian/gecko-controller/etc/gecko-controller
 	mkdir -p debian/gecko-controller/lib/systemd/system
+	mkdir -p debian/gecko-controller/usr/share/gecko-controller/web/static/dist
+	mkdir -p debian/gecko-controller/usr/share/gecko-controller/web/templates
 	install -m 755 debian/gecko-controller.sh debian/gecko-controller/usr/bin/gecko-controller
 	install -m 755 debian/gecko-web.sh debian/gecko-controller/usr/bin/gecko-web
 	install -m 644 debian/gecko-controller.service debian/gecko-controller/lib/systemd/system/

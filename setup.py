@@ -8,7 +8,8 @@ setup(
     package_data={
         'gecko_controller.web': [
             'templates/*',
-            'static/*',
+            'static/dist/*',
+            'static/components/*',
         ],
     },
     install_requires=[

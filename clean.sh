@@ -26,6 +26,17 @@ rm -rf "${PROJECT_ROOT}"/*.egg-info/
 find "${PROJECT_ROOT}" -type d -name "__pycache__" -exec rm -rf {} +
 find "${PROJECT_ROOT}" -type f -name "*.pyc" -delete
 
+# Clean Node.js build artifacts
+rm -rf "${PROJECT_ROOT}"/gecko_controller/web/static/node_modules/
+rm -rf "${PROJECT_ROOT}"/gecko_controller/web/static/dist/
+rm -rf "${PROJECT_ROOT}"/gecko_controller/web/static/package-lock.json
+find "${PROJECT_ROOT}" -type f -name ".npm" -delete
+find "${PROJECT_ROOT}" -type d -name ".npm" -exec rm -rf {} +
+find "${PROJECT_ROOT}" -type f -name ".npmrc" -delete
+find "${PROJECT_ROOT}" -type f -name ".node_repl_history" -delete
+rm -rf "${PROJECT_ROOT}"/.npm/
+rm -rf "${PROJECT_ROOT}"/.node-gyp/
+
 # Clean dpkg build artifacts
 rm -f "${PROJECT_ROOT}"/../gecko-controller_*.deb
 rm -f "${PROJECT_ROOT}"/../gecko-controller_*.changes
