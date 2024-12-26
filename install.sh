@@ -18,8 +18,8 @@ if [ ! -f /swapfile ]; then
     sudo swapon /swapfile
 fi
 
-# Build the debian package
-DEB_BUILD_OPTIONS=noddebs debuild -us -uc -ui
+# Build the debian package. Note that lintian is too slow on a Pi zero!
+DEB_BUILD_OPTIONS=noddebs debuild --no-lintian -us -uc -ui
 
 # Move up to parent directory where .deb file will be
 cd ..

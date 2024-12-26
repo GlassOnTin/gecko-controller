@@ -47,6 +47,10 @@ A Raspberry Pi-based temperature, light, and UV controller for gecko vivarium mo
    # Navigate to Interface Options > I2C > Enable
    ```
 
+   Note: The installer will automatically configure a lower I2C baud rate (10kHz)
+   for improved reliability with long cables. This setting can be found in
+   /boot/config.txt after installation.
+
 2. Install the package:
    ```bash
    sudo apt update
@@ -66,7 +70,13 @@ A Raspberry Pi-based temperature, light, and UV controller for gecko vivarium mo
 
 ### Method 2: Running from Source
 
-1. Enable I2C as described above
+1. Enable I2C and configure for long cables:
+   ```bash
+   sudo raspi-config  # Enable I2C in Interface Options
+
+   # Add to /boot/config.txt:
+   dtparam=i2c_arm=on,i2c_arm_baudrate=10000
+   ```
 
 2. Clone the repository:
    ```bash

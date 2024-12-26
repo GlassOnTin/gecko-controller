@@ -12,6 +12,8 @@ import pathlib
 from typing import Tuple, Optional
 from pathlib import Path
 
+from gecko_controller.ssh1106 import SSH1106Display
+
 # Constants for logging
 LOG_DIR = "/var/log/gecko-controller"
 LOG_FILE = "readings.csv"

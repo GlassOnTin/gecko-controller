@@ -1,3 +1,18 @@
+import pytest
+import time
+from gecko_controller.controller import GeckoController
+
+@pytest.fixture(scope="module")
+def controller():
+    """Initialize and return a GeckoController instance"""
+    controller = GeckoController()
+    yield controller
+    # Cleanup if needed
+    if hasattr(controller, 'display'):
+        del controller.display
+    if hasattr(controller, 'bus'):
+        controller.bus.close()
+
 @pytest.mark.timeout(30)  # Add timeout to prevent hanging
 def test_temperature_reading(controller):
     """Test temperature sensor reading"""
@@ -34,3 +49,6 @@ def test_uv_reading(controller):
             return
         time.sleep(1)
     pytest.fail("UV reading failed after 3 attempts")
+
+if __name__ == "__main__":
+    pytest.main(["-v", __file__])

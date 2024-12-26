@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 import time
 import smbus2
+import pytest
 
 def test_display():
+    """Test basic I2C display functionality"""
     print("Starting basic I2C display test")
     bus = smbus2.SMBus(1)
     address = 0x3C
 
-    # Try to write the simplest possible command - display off
     try:
         print(f"\nTesting basic write to display at address 0x{address:02X}")
         # Write display off command (0xAE)
@@ -22,6 +23,7 @@ def test_display():
         print("Successfully wrote display on command")
 
         print("\nBasic communication test passed!")
+        assert True, "Display communication successful"
 
     except OSError as e:
         print(f"\nError communicating with display: {e}")
@@ -31,9 +33,7 @@ def test_display():
         print("3. Check for pull-up resistors on SDA and SCL")
         print("4. Try lower I2C speed in /boot/config.txt:")
         print("   dtparam=i2c_arm=on,i2c_arm_baudrate=50000")
-        return False
-
-    return True
+        pytest.fail("Display communication failed")
 
 if __name__ == "__main__":
-    test_display()
+    pytest.main(["-v", __file__])
