@@ -1,6 +1,6 @@
 # Gecko Controller Build System
 PYTHON := python3
-BUILD_SCRIPT := build/scripts/build.py
+BUILD_SCRIPT := tools/build.py
 
 .PHONY: all clean build test package build-frontend build-backend
 

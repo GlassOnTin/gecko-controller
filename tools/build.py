@@ -88,6 +88,7 @@ class BuildManager:
 
             # Clean Python build artifacts
             paths_to_clean = [
+                self.project_root / "build",
                 self.project_root / "dist",
                 self.project_root / "*.egg-info",
                 self.frontend_dir / "dist",
