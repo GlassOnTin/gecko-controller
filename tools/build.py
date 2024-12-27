@@ -27,8 +27,9 @@ class PackagingError(BuildError):
 class BuildManager:
     def __init__(self):
         self.logger = self._setup_logging()
-        # Since we're in build/scripts/, go up two levels to project root
-        self.project_root = Path(__file__).resolve().parent.parent.parent
+        # Since we're in tools/, go up one level to project root
+        self.project_root = Path(__file__).resolve().parent.parent
+        print(f"Project root: {self.project_root}")
         self.build_dir = self.project_root / "build"
         self.frontend_dir = self.project_root / "gecko_controller" / "web" / "static"
         self.version = self._get_version()
