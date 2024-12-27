@@ -2,7 +2,7 @@ from setuptools import setup, find_namespace_packages
 
 setup(
     name="gecko-controller",
-    version="0.8.3",
+    version="0.8.4",
     packages=find_namespace_packages(include=[
         'gecko_controller*',
         'tests*'
