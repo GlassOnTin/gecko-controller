@@ -2,13 +2,11 @@ from setuptools import setup, find_namespace_packages
 
 setup(
     name="gecko-controller",
-    version="1.0.0",
+    version="0.8.3",
     packages=find_namespace_packages(include=[
         'gecko_controller*',
         'tests*'
-    ], exclude=[
-        'gecko_controller.web.static*',
-    ]),
+    ]),  # Remove the exclude
     package_data={
         "gecko_controller": [
             "fonts/*.pcf",
