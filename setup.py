@@ -6,15 +6,16 @@ setup(
     packages=find_packages(),
     include_package_data=True,
     package_data={
-        'gecko_controller.web': [
-            'templates/*',
-            'static/dist/*',
-            'static/components/*',
+        'gecko_controller': [
+            'web/templates/*',
+            'web/static/dist/*',
+            'web/static/components/*',
+            'fonts/*',
         ],
     },
     install_requires=[
         "RPi.GPIO>=0.7.1",
-        "smbus>=1.1.post2",
+        "smbus>=1.1.0",
         "smbus2>=0.4.3",
         "Pillow>=10.2.0",
         "Flask>=2.2.2",

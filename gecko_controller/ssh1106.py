@@ -178,3 +178,4 @@ class SSH1106Display:
                 self.init_display()  # Try to recover by reinitializing
             except:
                 print("Failed to recover display")
+

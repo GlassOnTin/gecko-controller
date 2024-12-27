@@ -41,8 +41,8 @@ python3 -m venv /opt/gecko-controller/venv
 
 # Install Python dependencies
 log "Installing Python dependencies..."
-/opt/gecko-controller/venv/bin/pip install --upgrade pip wheel setuptools
-/opt/gecko-controller/venv/bin/pip install \
+/opt/gecko-controller/venv/bin/python3 -m pip install --upgrade pip wheel setuptools
+/opt/gecko-controller/venv/bin/python3 -m pip install \
     RPi.GPIO \
     smbus2 \
     Pillow \
@@ -51,9 +51,14 @@ log "Installing Python dependencies..."
 
 # Build and install JavaScript components
 log "Building JavaScript components..."
-cd gecko_controller/web/static
+cd "${PROJECT_ROOT}/gecko_controller/web/static"
 npm install
 npm run build:prod
+cd "${PROJECT_ROOT}"
+
+# Install our package in development mode
+log "Installing gecko-controller package..."
+/opt/gecko-controller/venv/bin/python3 -m pip install -e "${PROJECT_ROOT}"
 
 # Install configuration file if it doesn't exist
 if [ ! -f "/etc/gecko-controller/config.py" ]; then
@@ -77,8 +82,8 @@ systemctl enable gecko-web
 
 # Start services
 log "Starting services..."
-systemctl start gecko-controller
-systemctl start gecko-web
+systemctl restart gecko-controller
+systemctl restart gecko-web
 
 # Configure I2C
 log "Configuring I2C..."

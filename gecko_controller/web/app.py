@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-# gecko_controller/web/app.py
 from flask import Flask, render_template, jsonify, request, send_from_directory
 import os
+import sys
 import re
 import csv
 import sys
@@ -14,6 +14,29 @@ import importlib.util
 from typing import Dict, Any, Tuple
 from typing import Tuple, Optional
 import logging
+
+# Configure logging
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler('/var/log/gecko-controller/web-debug.log')
+    ]
+)
+logger = logging.getLogger('gecko_web')
+
+# Add the project root to the Python path
+project_root = str(Path(__file__).resolve().parent.parent.parent)
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
+try:
+    from gecko_controller.display_socket import DisplaySocketClient
+    logger.debug("Successfully imported DisplaySocketClient")
+except Exception as e:
+    logger.exception("Error importing DisplaySocketClient")
+
 
 def get_app_paths():
     """Determine the correct paths for templates and static files"""
@@ -45,6 +68,7 @@ template_dir, static_dir = get_app_paths()
 app = Flask(__name__, 
            template_folder=template_dir,
            static_folder=static_dir)
+logger.debug("Flask app created")
 
 # Rest of your existing code remains the same...
 CONFIG_FILE = '/etc/gecko-controller/config.py'
@@ -52,13 +76,13 @@ BACKUP_FILE = '/etc/gecko-controller/config.py.bak'
 LOG_FILE = '/var/log/gecko-controller/readings.csv'
 
 # Add some debugging information at startup
-@app.before_first_request
 def log_startup_info():
-    app.logger.info(f'Current working directory: {os.getcwd()}')
-    app.logger.info(f'Template folder: {app.template_folder}')
-    app.logger.info(f'Static folder: {app.static_folder}')
-    app.logger.info(f'Template folder exists: {os.path.exists(app.template_folder)}')
-    app.logger.info(f'Static folder exists: {os.path.exists(app.static_folder)}')
+    with app.app_context():
+        app.logger.info(f'Current working directory: {os.getcwd()}')
+        app.logger.info(f'Template folder: {app.template_folder}')
+        app.logger.info(f'Static folder: {app.static_folder}')
+        app.logger.info(f'Template folder exists: {os.path.exists(app.template_folder)}')
+        app.logger.info(f'Static folder exists: {os.path.exists(app.static_folder)}')
 
 # Define all required fields and their types
 REQUIRED_CONFIG = {
@@ -803,7 +827,64 @@ def get_logs():
     print(f"Returning {len(data['timestamps'])} data points")
             
     return jsonify(data)
-    
+
+# Modify the display endpoints to include logging
+@app.route('/api/display', methods=['GET'])
+def get_display():
+    """Get current OLED display image as base64 PNG"""
+    logger.debug("Display endpoint accessed")
+
+    try:
+        client = DisplaySocketClient()
+        logger.debug("Created DisplaySocketClient")
+
+        success, image_data, error = client.get_image()
+        logger.debug(f"Got response - success: {success}, error: {error}")
+
+        if success:
+            return jsonify({
+                'status': 'success',
+                'image': image_data
+            })
+        else:
+            logger.error(f"Failed to get image: {error}")
+            return jsonify({
+                'status': 'error',
+                'message': error or 'Failed to get display image'
+            }), 500
+
+    except Exception as e:
+        logger.exception("Error in display endpoint")
+        return jsonify({
+            'status': 'error',
+            'message': f'Internal error: {str(e)}'
+        }), 500
+
+# Add this new endpoint to check service status
+@app.route('/api/display/status', methods=['GET'])
+def get_display_status():
+    """Check status of display socket connection"""
+    socket_exists = os.path.exists("/tmp/gecko-display.sock")
+    socket_permissions = None
+    socket_owner = None
+
+    if socket_exists:
+        try:
+            stat = os.stat("/tmp/gecko-display.sock")
+            socket_permissions = oct(stat.st_mode)[-3:]  # Get last 3 digits of octal permissions
+            socket_owner = f"{stat.st_uid}:{stat.st_gid}"
+        except Exception as e:
+            logger.error(f"Error checking socket stats: {e}")
+
+    return jsonify({
+        'socket_exists': socket_exists,
+        'socket_path': "/tmp/gecko-display.sock",
+        'socket_permissions': socket_permissions,
+        'socket_owner': socket_owner,
+        'web_service_user': os.getuid(),
+        'web_service_group': os.getgid()
+    })
+
 @app.after_request
 def add_header(response):
     response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, post-check=0, pre-check=0, max-age=0'
@@ -814,6 +895,8 @@ def add_header(response):
 def main():
     app.logger.info('Starting Flask application...')
     app.run(host='0.0.0.0', port=80)
+    logger.debug(f"Available routes: {[str(p) for p in app.url_map.iter_rules()]}")
+    log_startup_info()
 
 if __name__ == '__main__':
     main()

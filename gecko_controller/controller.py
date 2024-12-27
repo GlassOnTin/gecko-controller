@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import os
+import sys
 import time
 import math
 import smbus2
@@ -12,7 +13,13 @@ import pathlib
 from typing import Tuple, Optional
 from pathlib import Path
 
+# Add the project root to the Python path
+project_root = str(Path(__file__).resolve().parent.parent.parent)
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
 from gecko_controller.ssh1106 import SSH1106Display
+from gecko_controller.display_socket import DisplaySocketServer
 
 # Constants for logging
 LOG_DIR = "/var/log/gecko-controller"
@@ -39,7 +46,6 @@ except ImportError:
        
         sys.exit(1)
 
-
 # Font loading helper
 def load_font(name: str, size: int) -> ImageFont.FreeTypeFont:
     """Load a font, falling back to default if not found"""
@@ -49,169 +55,6 @@ def load_font(name: str, size: int) -> ImageFont.FreeTypeFont:
     except Exception as e:
         print(f"Warning: Could not load font {name}: {e}")
         return ImageFont.load_default()
-
-class SSH1106Display:
-    def __init__(self, i2c_addr=0x3C, width=128, height=64):
-        self.addr = i2c_addr
-        self.width = width
-        self.height = height
-        self.pages = height // 8
-        self.buffer = [0] * (width * self.pages)
-
-        print(f"Initializing SSH1106 Display on i2c address 0x{i2c_addr:02x}")
-        print(f"Display size: {width}x{height} in {self.pages} pages")
-
-        self.bus = smbus2.SMBus(1)
-        time.sleep(0.1)  # Wait after bus initialization
-        self.init_display()
-
-    def init_display(self):
-        """Initialize the SSH1106 display with delays between commands"""
-        print("\nInitializing display...")
-
-        # Turn display off first
-        self.write_cmd(0xAE)
-        time.sleep(0.001)  # 1ms delay
-
-        # Set display clock div
-        self.write_cmd(0xD5)
-        time.sleep(0.001)
-        self.write_cmd(0x80)
-        time.sleep(0.001)
-
-        # Set multiplex
-        self.write_cmd(0xA8)
-        time.sleep(0.001)
-        self.write_cmd(0x3F)
-        time.sleep(0.001)
-
-        # Set display offset
-        self.write_cmd(0xD3)
-        time.sleep(0.001)
-        self.write_cmd(0x00)
-        time.sleep(0.001)
-
-        # Set start line
-        self.write_cmd(0x40)
-        time.sleep(0.001)
-
-        # Enable charge pump
-        self.write_cmd(0x8D)
-        time.sleep(0.001)
-        self.write_cmd(0x14)
-        time.sleep(0.001)
-
-        # Memory mode
-        self.write_cmd(0x20)
-        time.sleep(0.001)
-        self.write_cmd(0x00)
-        time.sleep(0.001)
-
-        # Seg remap
-        self.write_cmd(0xA1)
-        time.sleep(0.001)
-
-        # COM scan direction
-        self.write_cmd(0xC8)
-        time.sleep(0.001)
-
-        # Set COM pins
-        self.write_cmd(0xDA)
-        time.sleep(0.001)
-        self.write_cmd(0x12)
-        time.sleep(0.001)
-
-        # Set contrast
-        self.write_cmd(0x81)
-        time.sleep(0.001)
-        self.write_cmd(0xFF)
-        time.sleep(0.001)
-
-        # Set precharge
-        self.write_cmd(0xD9)
-        time.sleep(0.001)
-        self.write_cmd(0xF1)
-        time.sleep(0.001)
-
-        # Set VCOMH
-        self.write_cmd(0xDB)
-        time.sleep(0.001)
-        self.write_cmd(0x20)
-        time.sleep(0.001)
-
-        # Set normal display
-        self.write_cmd(0xA4)
-        time.sleep(0.001)
-        self.write_cmd(0xA6)
-        time.sleep(0.001)
-
-        # Turn display on
-        self.write_cmd(0xAF)
-        time.sleep(0.1)  # Longer delay after turning display on
-
-        print("Display initialization complete")
-
-    def show_image(self, image: Image.Image):
-        """Display a PIL Image object"""
-        try:
-            # Convert image to 1-bit color and rotate if needed
-            if image.mode != '1':
-                image = image.convert('1')
-
-            # No rotation needed - remove the 180 degree rotation
-            # image = image.rotate(180, expand=True)
-
-            # Create a new image with the full 132x64 size
-            full_image = Image.new('1', (132, 64), 255)  # white background
-
-            # Paste the rotated image in the center
-            paste_x = (132 - image.width) // 2
-            paste_y = (64 - image.height) // 2
-            full_image.paste(image, (paste_x, paste_y))
-
-            # Reset the display position
-            self.write_cmd(0x02)  # Set lower column address
-            self.write_cmd(0x10)  # Set higher column address
-
-            # Write display buffer one page at a time
-            for page in range(self.pages):
-                self.write_cmd(0xB0 + page)  # Set page address
-                time.sleep(0.001)  # Small delay after page command
-
-                for x in range(132):  # Write all 132 columns
-                    # Collect 8 vertical pixels for this column
-                    bits = 0
-                    for bit in range(8):
-                        y = page * 8 + bit
-                        if y < 64 and x < 132:
-                            if full_image.getpixel((x, y)) == 0:  # Black pixel
-                                bits |= (1 << bit)
-
-                    # Write the data byte
-                    self.write_data(bits)
-                    time.sleep(0.0001)  # Small delay between columns
-
-                time.sleep(0.001)  # Small delay between pages
-
-        except Exception as e:
-            print(f"Error in show_image: {e}")
-            raise
-
-    def write_cmd(self, cmd: int):
-        """Write a command to the display"""
-        try:
-            self.bus.write_byte_data(self.addr, 0x00, cmd)
-        except Exception as e:
-            print(f"Error writing command 0x{cmd:02X}: {e}")
-            raise
-
-    def write_data(self, data: int):
-        """Write data to the display"""
-        try:
-            self.bus.write_byte_data(self.addr, 0x40, data)
-        except Exception as e:
-            print(f"Error writing data 0x{data:02X}: {e}")
-            raise
 
 class GeckoController:
     def __init__(self):
@@ -257,6 +100,7 @@ class GeckoController:
         # Create an image buffer
         self.image = Image.new('1', (128, 64), 255)  # 255 = white background
         self.draw = ImageDraw.Draw(self.image)
+        self.display_socket = DisplaySocketServer()
 
         # Load regular font
         self.regular_font = load_font("DejaVuSans.ttf", 10)
@@ -340,24 +184,34 @@ class GeckoController:
         """Configure logging with rotation"""
         os.makedirs(LOG_DIR, exist_ok=True)
         log_file = Path(LOG_DIR + "/" + LOG_FILE)
-        
-        # Configure main logger
+
+        # Configure main logger for system messages
         self.logger = logging.getLogger("gecko_controller")
         self.logger.setLevel(logging.INFO)
-        
-        # Create rotating file handler
-        handler = logging.handlers.RotatingFileHandler(
+
+        # Configure readings logger for sensor data
+        self.readings_logger = logging.getLogger("gecko_controller.readings")
+        self.readings_logger.setLevel(logging.INFO)
+
+        # Create rotating file handler for readings
+        readings_handler = logging.handlers.RotatingFileHandler(
             log_file,
             maxBytes=MAX_LOG_SIZE,
             backupCount=LOG_BACKUP_COUNT
         )
-        
-        # Create formatter
-        formatter = logging.Formatter(
+
+        # Create formatter for readings
+        readings_formatter = logging.Formatter(
             '%(asctime)s,%(temp).1f,%(humidity).1f,%(uva).4f,%(uvb).4f,%(uvc).4f,%(light)d,%(heat)d'
         )
-        handler.setFormatter(formatter)
-        self.logger.addHandler(handler)
+        readings_handler.setFormatter(readings_formatter)
+        self.readings_logger.addHandler(readings_handler)
+
+        # Create console handler for system messages
+        console_handler = logging.StreamHandler()
+        console_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+        console_handler.setFormatter(console_formatter)
+        self.logger.addHandler(console_handler)
 
     def setup_display(self):
         """Initialize the display"""
@@ -499,7 +353,7 @@ class GeckoController:
         """Log readings if enough time has passed"""
         current_time = time.time()
         if current_time - self.last_log_time >= LOG_INTERVAL:
-            self.logger.info(
+            self.readings_logger.info(
                 "",
                 extra={
                     'temp': temp if temp is not None else -1,
@@ -583,6 +437,7 @@ class GeckoController:
     def update_display(self, temp, humidity, uva, uvb, uvc, light_status, heat_status):
         """Update the display with current readings"""
         self.create_display_group(temp, humidity, uva, uvb, uvc, light_status, heat_status)
+        self.display_socket.send_image(self.image)
 
     def run(self):
         """Main control loop"""
