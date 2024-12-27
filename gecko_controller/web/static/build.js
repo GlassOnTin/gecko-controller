@@ -1,12 +1,15 @@
-const esbuild = require('esbuild');
-const fs = require('fs');
 const path = require('path');
+const fs = require('fs');
 
 // Ensure dist directory exists
 const distDir = path.join(__dirname, 'dist');
 if (!fs.existsSync(distDir)) {
     fs.mkdirSync(distDir, { recursive: true });
 }
+
+// Import esbuild using require.resolve to ensure we find it
+const esbuildPath = require.resolve('esbuild', { paths: [__dirname, path.join(__dirname, 'node_modules')] });
+const esbuild = require(esbuildPath);
 
 const options = {
     entryPoints: ['app.js'],

@@ -1,7 +1,6 @@
 #!/usr/bin/make -f
 
 export PYBUILD_NAME=gecko_controller
-export PYBUILD_SYSTEM=distutils
 export DH_VERBOSE=1
 
 %:
@@ -10,24 +9,23 @@ export DH_VERBOSE=1
 override_dh_auto_build:
 	# Build Python package
 	python3 setup.py build
-	# Build JavaScript
+	# Build JavaScript with production settings
 	cd gecko_controller/web/static && \
-	npm install && \
-	npm run build:prod
+	npm ci && \
+	NODE_ENV=production npm run build:prod
 
 override_dh_auto_install:
-	python3 setup.py install --root=$(CURDIR)/debian/gecko-controller --install-layout=deb
-	# Install additional files
-	mkdir -p debian/gecko-controller/usr/bin
+	dh_auto_install
+	# Create required directories
 	mkdir -p debian/gecko-controller/etc/gecko-controller
 	mkdir -p debian/gecko-controller/lib/systemd/system
-	mkdir -p debian/gecko-controller/usr/share/gecko-controller/web/static/dist
+	mkdir -p debian/gecko-controller/usr/share/gecko-controller/web/static
 	mkdir -p debian/gecko-controller/usr/share/gecko-controller/web/templates
-	install -m 755 debian/gecko-controller.sh debian/gecko-controller/usr/bin/gecko-controller
-	install -m 755 debian/gecko-web.sh debian/gecko-controller/usr/bin/gecko-web
-	install -m 644 debian/gecko-controller.service debian/gecko-controller/lib/systemd/system/
-	install -m 644 debian/gecko-web.service debian/gecko-controller/lib/systemd/system/
-	install -m 644 debian/config.py debian/gecko-controller/etc/gecko-controller/
-
-override_dh_auto_test:
-	:
+	# Install configuration
+	install -m644 debian/config.py debian/gecko-controller/etc/gecko-controller/config.py
+	# Install systemd services
+	install -m644 debian/gecko-controller.service debian/gecko-controller/lib/systemd/system/
+	install -m644 debian/gecko-web.service debian/gecko-controller/lib/systemd/system/
+	# Install web assets
+	cp -r gecko_controller/web/static/dist/* debian/gecko-controller/usr/share/gecko-controller/web/static/
+	cp -r gecko_controller/web/templates/* debian/gecko-controller/usr/share/gecko-controller/web/templates/

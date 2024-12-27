@@ -1,31 +1,35 @@
-from setuptools import setup, find_packages
+from setuptools import setup, find_namespace_packages
 
 setup(
     name="gecko-controller",
-    version="0.8.2",
-    packages=find_packages(),
-    include_package_data=True,
+    version="1.0.0",
+    packages=find_namespace_packages(include=[
+        'gecko_controller*',
+        'tests*'
+    ], exclude=[
+        'gecko_controller.web.static*',
+    ]),
     package_data={
-        'gecko_controller': [
-            'web/templates/*',
-            'web/static/dist/*',
-            'web/static/components/*',
-            'fonts/*',
-        ],
+        "gecko_controller": [
+            "fonts/*.pcf",
+            "web/templates/*.html",
+            "web/static/dist/*",
+            "web/static/components/*.jsx"
+        ]
     },
+    include_package_data=True,
     install_requires=[
-        "RPi.GPIO>=0.7.1",
-        "smbus>=1.1.0",
-        "smbus2>=0.4.3",
-        "Pillow>=10.2.0",
+        "RPi.GPIO",
+        "smbus2",
+        "Pillow",
         "Flask>=2.2.2",
-        "pytest>=8.3.4",
-        "adafruit-circuitpython-busdevice>=5.2.6",
+        "adafruit-circuitpython-busdevice"
     ],
+    python_requires=">=3.9",
     entry_points={
-        'console_scripts': [
-            'gecko-controller=gecko_controller.controller:main',
-            'gecko-web=gecko_controller.web.app:main',
-        ],
-    },
+        "console_scripts": [
+            "gecko-controller=gecko_controller.controller:main",
+            "gecko-web=gecko_controller.web.app:main"
+        ]
+    }
 )

@@ -1,48 +1,105 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
-# Ensure required build dependencies are installed
-sudo apt-get update
-sudo apt-get install -y devscripts debhelper dh-python python3-all python3-setuptools python3-pip nodejs npm
+# Script configuration
+PACKAGE_NAME="gecko-controller"
+MIN_MEMORY_MB=512
+REQUIRED_SPACE_MB=1024
 
-# Clear any previous build artifacts
-rm -rf *.tar.gz *.dsc *.changes *.deb
-rm -rf build/ dist/ *.egg-info/
+# Function to log messages with timestamps
+log() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1"
+}
 
-# Build JavaScript components
-echo "Building JavaScript components..."
-cd gecko_controller/web/static
-npm install
-NODE_ENV=production npm run build:prod
-cd ../../..
+# Check system requirements
+check_requirements() {
+    log "Checking system requirements..."
 
-# Increase available memory with swap
-if [ ! -f /swapfile ]; then
-    echo "Creating swap file..."
-    sudo fallocate -l 1G /swapfile
-    sudo chmod 600 /swapfile
-    sudo mkswap /swapfile
-    sudo swapon /swapfile
-fi
+    # Check available memory
+    local available_mem=$(free -m | awk '/^Mem:/ {print $7}')
+    if [ "$available_mem" -lt "$MIN_MEMORY_MB" ]; then
+        log "Low memory detected ($available_mem MB). Setting up swap..."
+        if [ ! -f /swapfile ]; then
+            sudo fallocate -l 1G /swapfile
+            sudo chmod 600 /swapfile
+            sudo mkswap /swapfile
+            sudo swapon /swapfile
+        fi
+    fi
 
-# Build the debian package. Note that lintian is too slow on a Pi zero!
-DEB_BUILD_OPTIONS=noddebs debuild --no-lintian -us -uc -ui
+    # Check available disk space
+    local available_space=$(df -m . | awk 'NR==2 {print $4}')
+    if [ "$available_space" -lt "$REQUIRED_SPACE_MB" ]; then
+        log "Error: Insufficient disk space. Need at least ${REQUIRED_SPACE_MB}MB"
+        exit 1
+    fi
+}
 
-# Move up to parent directory where .deb file will be
-cd ..
+# Install build dependencies
+install_dependencies() {
+    log "Installing build dependencies..."
+    sudo apt-get update
+    sudo apt-get install -y \
+        devscripts \
+        debhelper \
+        dh-python \
+        python3-all \
+        python3-setuptools \
+        python3-pip \
+        nodejs \
+        npm \
+        git-buildpackage
+}
 
-# Find and install the latest built package
-latest_deb=$(ls -t gecko-controller_*.deb | head -n1)
-if [ -n "$latest_deb" ]; then
-    echo "Installing $latest_deb..."
-    sudo apt-get install -y "./$latest_deb"
-else
-    echo "Error: No .deb package found after build"
-    exit 1
-fi
+# Clean build environment
+clean_environment() {
+    log "Cleaning build environment..."
+    rm -rf debian/${PACKAGE_NAME} debian/.debhelper debian/*.log debian/*.substvars
+    rm -rf *.tar.gz *.dsc *.changes *.deb *.buildinfo
+    rm -rf build/ dist/ *.egg-info/
+    rm -rf gecko_controller/web/static/node_modules gecko_controller/web/static/dist
+}
 
-# Restart services to ensure new web interface is loaded
-echo "Restarting services..."
-sudo systemctl restart gecko-controller gecko-web
+# Build package
+build_package() {
+    log "Building Debian package..."
 
-echo "Installation complete!"
+    # Build with recommended options for Raspberry Pi
+    DEB_BUILD_OPTIONS="noddebs nocheck" \
+    DEBUILD_DPKG_BUILDPACKAGE_OPTS="-us -uc -ui" \
+    debuild --no-lintian ${DEBUILD_EXTRA_OPTS:-}
+}
+
+# Install built package
+install_package() {
+    log "Looking for built package..."
+    cd ..
+    local latest_deb=$(ls -t ${PACKAGE_NAME}_*.deb 2>/dev/null | head -n1)
+
+    if [ -n "$latest_deb" ]; then
+        log "Installing $latest_deb..."
+        sudo apt-get install -y "./$latest_deb"
+        log "Restarting service..."
+        sudo systemctl restart gecko-controller
+    else
+        log "Error: No .deb package found after build"
+        exit 1
+    fi
+}
+
+# Main execution
+main() {
+    log "Starting build process for ${PACKAGE_NAME}"
+
+    check_requirements
+    install_dependencies
+    clean_environment
+
+    build_package
+    install_package
+
+    log "Build and installation completed successfully!"
+}
+
+# Execute main function
+main "$@"

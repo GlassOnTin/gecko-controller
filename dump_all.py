@@ -9,11 +9,13 @@ def concat_git_files(output_file="all.txt"):
 
     # Filter by extension
     #extensions = {".sh", ".py", ".cpp", ".h", ".i", ".txt", ".md", ".html", ".js", ".jsx", ".toml"}
-    #paths = {"debian"}
-    excludes = {"changelog", "gitignore", "jpg", "fonts", "license"}
+    paths = {""}
+    excludes = {"dump_all.py", "test", ".github", "changelog", "gitignore", "jpg", "fonts", "license"}
 
     # Filter files based on extensions, included paths, and excludes
-    files = [f for f in files if not any(exclude.lower() in f.lower() for exclude in excludes)]
+    files = [f for f in files if
+             not any(exclude.lower() in f.lower() for exclude in excludes)
+             and any(include.lower() in f.lower() for include in paths)]
 
     # Write concatenated output
     with open(output_file, "w") as outfile:

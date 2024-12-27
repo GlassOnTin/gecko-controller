@@ -1,15 +1,19 @@
 [Unit]
-Description=Gecko Enclosure Controller
+Description=Gecko Vivarium Controller
 After=network.target
 
 [Service]
-Type=simple
-User=root
-Group=root
-WorkingDirectory=/opt/gecko-controller
+Type=notify
+User=gecko-controller
+Group=gpio
+RuntimeDirectory=gecko-controller
+LogsDirectory=gecko-controller
+StateDirectory=gecko-controller
+ConfigurationDirectory=gecko-controller
 Environment=PYTHONPATH=/usr/lib/python3/dist-packages
-ExecStart=/opt/gecko-controller/venv/bin/python3 -m gecko_controller.controller
-Restart=always
+ExecStart=/usr/bin/python3 -m gecko_controller.controller
+ExecStartPost=/usr/bin/python3 -m gecko_controller.web.app
+Restart=on-failure
 RestartSec=10
 
 [Install]

@@ -1,5 +1,11 @@
+include LICENSE
 include README.md
-recursive-include gecko_controller/web/templates *
-recursive-include gecko_controller/web/static *
-recursive-include gecko_controller/fonts *
-include gecko_controller/*.py
+recursive-include gecko_controller/fonts *.pcf
+recursive-include gecko_controller/web/templates *.html
+recursive-include gecko_controller/web/static/dist *
+recursive-include gecko_controller/web/static/components *.jsx
+global-exclude *.pyc
+global-exclude __pycache__
+global-exclude *.pyo
+global-exclude .git*
+global-exclude node_modules/*
