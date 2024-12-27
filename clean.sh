@@ -19,7 +19,6 @@ rm -f "${PROJECT_ROOT}/debian"/*.substvars
 rm -f "${PROJECT_ROOT}/debian/debhelper-build-stamp"
 
 # Clean Python build artifacts
-rm -rf "${PROJECT_ROOT}/build/"
 rm -rf "${PROJECT_ROOT}/dist/"
 rm -rf "${PROJECT_ROOT}/.pybuild/"
 rm -rf "${PROJECT_ROOT}"/*.egg-info/
