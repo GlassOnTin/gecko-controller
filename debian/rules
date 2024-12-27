@@ -15,17 +15,21 @@ override_dh_auto_build:
 	NODE_ENV=production npm run build:prod
 
 override_dh_auto_install:
-	dh_auto_install
 	# Create required directories
-	mkdir -p debian/gecko-controller/etc/gecko-controller
-	mkdir -p debian/gecko-controller/lib/systemd/system
-	mkdir -p debian/gecko-controller/usr/share/gecko-controller/web/static
-	mkdir -p debian/gecko-controller/usr/share/gecko-controller/web/templates
-	# Install configuration
-	install -m644 debian/config.py debian/gecko-controller/etc/gecko-controller/config.py
-	# Install systemd services
-	install -m644 debian/gecko-controller.service debian/gecko-controller/lib/systemd/system/
-	install -m644 debian/gecko-web.service debian/gecko-controller/lib/systemd/system/
-	# Install web assets
+	install -m0755 -d debian/gecko-controller/etc/gecko-controller
+	install -m0755 -d debian/gecko-controller/lib/systemd/system
+	install -m0755 -d debian/gecko-controller/usr/share/gecko-controller/web/static
+	install -m0755 -d debian/gecko-controller/usr/share/gecko-controller/web/templates
+	install -m0755 -d debian/gecko-controller/usr/lib/python3/dist-packages
+
+	# Install Python package manually
+	cp -r build/lib/* debian/gecko-controller/usr/lib/python3/dist-packages/
+
+	# Install configuration and service files
+	install -m0644 debian/config.py debian/gecko-controller/etc/gecko-controller/config.py
+	install -m0644 debian/gecko-controller.service debian/gecko-controller/lib/systemd/system/
+	install -m0644 debian/gecko-web.service debian/gecko-controller/lib/systemd/system/
+
+	# Install web assets - do this explicitly rather than through setuptools
 	cp -r gecko_controller/web/static/dist/* debian/gecko-controller/usr/share/gecko-controller/web/static/
 	cp -r gecko_controller/web/templates/* debian/gecko-controller/usr/share/gecko-controller/web/templates/

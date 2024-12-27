@@ -35,7 +35,11 @@ class PackagingUtils:
             with open(setup_py, 'r') as f:
                 for line in f:
                     if 'version=' in line:
-                        return line.split('=')[1].strip().strip('"\'').strip()
+                        version = line.split('version=')[1].strip().strip(',').strip('"\'')
+                        print(f"Extracted version: {version}")  # Debugging
+                        return version
+            self.logger.error("Version not found in setup.py")
+            return "0.0.0"
         except Exception as e:
             self.logger.error(f"Error reading version: {e}")
             return "0.0.0"
@@ -110,7 +114,7 @@ class PackagingUtils:
             self.logger.info("Building Debian package...")
 
             # Build command
-            cmd = ['debuild']
+            cmd = ['dpkg-buildpackage', '-us', '-uc']  # Use dpkg-buildpackage directly
             if no_sign:
                 cmd.extend(['-us', '-uc'])
             cmd.append('-b')  # Binary-only build
@@ -137,8 +141,20 @@ class PackagingUtils:
                 self.logger.error(f"Package build failed:\n{stderr}")
                 return False
 
+            # Determine the architecture from debian/control
+            control_file = self.debian_dir / "control"
+            architecture = "all"  # Default to "all"
+            try:
+                with open(control_file, 'r') as f:
+                    for line in f:
+                        if line.startswith('Architecture:'):
+                            architecture = line.split(':', 1)[1].strip()
+                            break
+            except Exception as e:
+                self.logger.warning(f"Failed to read debian/control: {e}. Using default architecture 'all'.")
+
             # Verify package was created
-            package_name = f"gecko-controller_{self.version}_all.deb"
+            package_name = f"gecko-controller_{self.version}_{architecture}.deb"
             package_path = self.project_root.parent / package_name
 
             if not package_path.exists():

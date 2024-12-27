@@ -7,5 +7,3 @@ recursive-include gecko_controller/web/static/components *.jsx
 global-exclude *.pyc
 global-exclude __pycache__
 global-exclude *.pyo
-global-exclude .git*
-global-exclude node_modules/*

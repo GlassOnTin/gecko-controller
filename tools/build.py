@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import re
 import os
 import sys
 import shutil
@@ -62,17 +63,22 @@ class BuildManager:
         return logger
 
     def _get_version(self) -> str:
-        """Extract version from setup.py"""
+        """Extract version from setup.py using regex"""
         setup_py = self.project_root / "setup.py"
         try:
             with open(setup_py, 'r') as f:
-                for line in f:
-                    if 'version=' in line:
-                        return line.split('=')[1].strip().strip('"\'').strip()
+                content = f.read()
+                # Regex pattern to match the version number
+                version_pattern = r'version\s*=\s*["\']([\d.]+)["\']'
+                match = re.search(version_pattern, content)
+                if match:
+                    return match.group(1)
+                else:
+                    self.logger.warning("Version number not found in setup.py")
+                    return "0.0.0"
         except Exception as e:
             self.logger.error(f"Error reading version from setup.py: {e}")
             return "0.0.0"
-
     def _clean_directory(self, path: Path) -> None:
         """Safely clean a directory while preserving the directory itself"""
         if path.exists():
@@ -83,7 +89,7 @@ class BuildManager:
                     shutil.rmtree(item)
 
     def clean(self) -> None:
-        """Clean all build artifacts"""
+        """Clean all build artifacts while preserving essential Debian packaging files"""
         try:
             self.logger.info("Cleaning build artifacts...")
 
@@ -93,7 +99,7 @@ class BuildManager:
                 self.project_root / "dist",
                 self.project_root / "*.egg-info",
                 self.frontend_dir / "dist",
-                self.frontend_dir / "node_modules"
+                self.frontend_dir / "node_modules",
             ]
 
             for path in paths_to_clean:
@@ -108,6 +114,24 @@ class BuildManager:
                 for d in dirs:
                     if d == "__pycache__":
                         shutil.rmtree(os.path.join(root, d))
+
+            # Clean Debian build artifacts (temporary/generated files)
+            debian_artifacts_to_clean = [
+                self.project_root / "debian/.debhelper",
+                self.project_root / "debian/files",
+                self.project_root / "debian/gecko-controller.postinst.debhelper",
+                self.project_root / "debian/gecko-controller.postrm.debhelper",
+                self.project_root / "debian/gecko-controller.prerm.debhelper",
+                self.project_root / "debian/gecko-controller.substvars",
+                self.project_root / "debian/gecko-controller",  # Temporary build directory
+            ]
+
+            for path in debian_artifacts_to_clean:
+                if path.exists():
+                    if path.is_file():
+                        path.unlink()
+                    else:
+                        shutil.rmtree(path)
 
             self.logger.info("Clean completed successfully")
 
