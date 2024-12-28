@@ -21,6 +21,7 @@ setup(
         "smbus2",
         "Pillow",
         "Flask>=2.2.2",
+        "asyncio",
         "adafruit-circuitpython-busdevice"
     ],
     extras_require={

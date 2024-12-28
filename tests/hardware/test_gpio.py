@@ -1,6 +1,12 @@
 import pytest
 import RPi.GPIO as GPIO
 import time
+from gecko_controller.controller import GeckoController
+
+@pytest.fixture
+def controller():
+    """Fixture to provide a GeckoController instance"""
+    return GeckoController()
 
 @pytest.fixture(scope="module")
 def gpio_setup():

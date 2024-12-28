@@ -1,13 +1,11 @@
-import socket
+import asyncio
 import os
 import json
 import base64
 import logging
-import ssl
 from io import BytesIO
 from PIL import Image
 from typing import Optional, Tuple, Dict
-from contextlib import contextmanager
 from dataclasses import dataclass
 from threading import Lock
 
@@ -48,103 +46,83 @@ class DisplaySocketServer(ImageSocketBase):
     def __init__(self, config: Optional[SocketConfig] = None):
         super().__init__(config)
         self._cleanup_socket()
-        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        self.sock.bind(self.config.socket_path)
-        os.chmod(self.config.socket_path, self.config.permissions)
-        self.sock.listen(5)  # Allow queue of 5 connections
-        self.logger.info(f"Server listening on {self.config.socket_path}")
+        self.server = None
 
     def _cleanup_socket(self) -> None:
         with self._lock:
             if os.path.exists(self.config.socket_path):
                 os.unlink(self.config.socket_path)
 
-    @contextmanager
-    def _client_connection(self):
-        client = None
+    async def start(self):
+        self.server = await asyncio.start_unix_server(
+            self._handle_client,
+            path=self.config.socket_path
+        )
+        os.chmod(self.config.socket_path, self.config.permissions)
+        self.logger.info(f"Server listening on {self.config.socket_path}")
+
+    async def _handle_client(self, reader, writer):
         try:
-            client, _ = self.sock.accept()
-            client.settimeout(self.config.timeout)
-            yield client
-        finally:
-            if client:
-                client.close()
+            compressed = await self._compress_image(self.current_image)
+            self._validate_image(compressed)
 
-    def send_image(self, image: Image.Image) -> bool:
-        try:
-            with self._lock:
-                compressed = self._compress_image(image)
-                self._validate_image(compressed)
+            response = {
+                'status': 'success',
+                'image': base64.b64encode(compressed).decode(),
+                'metadata': {
+                    'size': len(compressed),
+                    'format': 'JPEG',
+                    'mode': self.current_image.mode
+                }
+            }
 
-                with self._client_connection() as client:
-                    response = {
-                        'status': 'success',
-                        'image': base64.b64encode(compressed).decode(),
-                        'metadata': {
-                            'size': len(compressed),
-                            'format': 'JPEG',
-                            'mode': image.mode
-                        }
-                    }
-
-                    msg = json.dumps(response).encode()
-                    client.sendall(len(msg).to_bytes(4, byteorder='big'))
-                    client.sendall(msg)
-
-                return True
+            msg = json.dumps(response).encode()
+            writer.write(len(msg).to_bytes(4, byteorder='big'))
+            writer.write(msg)
+            await writer.drain()
 
         except Exception as e:
             self.logger.error(f"Error sending image: {e}")
-            return False
+        finally:
+            writer.close()
+            await writer.wait_closed()
 
-    def __del__(self):
-        try:
-            self.sock.close()
+    async def send_image(self, image: Image.Image) -> bool:
+        with self._lock:
+            self.current_image = image
+            return True
+
+    async def stop(self):
+        if self.server:
+            self.server.close()
+            await self.server.wait_closed()
             self._cleanup_socket()
-        except Exception as e:
-            self.logger.error(f"Error in cleanup: {e}")
 
 class DisplaySocketClient(ImageSocketBase):
     def __init__(self, config: Optional[SocketConfig] = None):
         super().__init__(config)
-        self.sock = None
 
-    def _connect(self) -> None:
-        if self.sock:
-            self.sock.close()
-        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        self.sock.settimeout(self.config.timeout)
-        self.sock.connect(self.config.socket_path)
-
-    def get_image(self) -> Tuple[bool, Optional[Image.Image], Optional[str]]:
+    async def get_image(self) -> Tuple[bool, Optional[Image.Image], Optional[str]]:
         for attempt in range(self.config.max_retries):
             try:
                 with self._lock:
-                    self._connect()
+                    reader, writer = await asyncio.open_unix_connection(
+                        path=self.config.socket_path
+                    )
 
-                    length_bytes = self.sock.recv(4)
+                    length_bytes = await reader.read(4)
                     if not length_bytes:
                         continue
 
                     msg_length = int.from_bytes(length_bytes, byteorder='big')
-                    chunks = []
-                    bytes_received = 0
+                    data = await reader.read(msg_length)
 
-                    while bytes_received < msg_length:
-                        chunk = self.sock.recv(
-                            min(self.config.chunk_size,
-                                msg_length - bytes_received))
-                        if not chunk:
-                            raise ConnectionError("Connection closed prematurely")
-                        chunks.append(chunk)
-                        bytes_received += len(chunk)
+                    response = json.loads(data.decode())
 
-                    data = json.loads(b''.join(chunks).decode())
+                    if response['status'] != 'success':
+                        raise ValueError(response.get('error', 'Unknown error'))
 
-                    if data['status'] != 'success':
-                        raise ValueError(data.get('error', 'Unknown error'))
-
-                    image_data = base64.b64decode(data['image'])
+                    image_data = base64.b64decode(response['image'])
                     self._validate_image(image_data)
 
                     return True, Image.open(BytesIO(image_data)), None
@@ -155,12 +133,28 @@ class DisplaySocketClient(ImageSocketBase):
                     return False, None, str(e)
 
             finally:
-                if self.sock:
-                    self.sock.close()
-                    self.sock = None
+                if writer:
+                    writer.close()
+                    await writer.wait_closed()
 
         return False, None, "Max retries exceeded"
 
-    def __del__(self):
-        if self.sock:
-            self.sock.close()
+async def main():
+    server = DisplaySocketServer()
+    await server.start()
+
+    # Example usage
+    image = Image.new('RGB', (100, 100), color='red')
+    await server.send_image(image)
+
+    client = DisplaySocketClient()
+    success, received_image, error = await client.get_image()
+    if success:
+        print("Image received successfully")
+    else:
+        print(f"Failed to receive image: {error}")
+
+    await server.stop()
+
+if __name__ == "__main__":
+    asyncio.run(main())

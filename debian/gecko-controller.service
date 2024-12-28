@@ -4,8 +4,9 @@ After=network.target
 
 [Service]
 Type=notify
-User=gecko-controller
-Group=gpio
+User=root
+Group=root
+WorkingDirectory=/opt/gecko-controller
 RuntimeDirectory=gecko-controller
 LogsDirectory=gecko-controller
 StateDirectory=gecko-controller

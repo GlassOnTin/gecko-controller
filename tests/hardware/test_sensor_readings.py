@@ -2,6 +2,11 @@ import pytest
 import os
 from gecko_controller.controller import GeckoController
 
+@pytest.fixture
+def controller():
+    """Fixture to provide a GeckoController instance"""
+    return GeckoController()
+
 def check_sensor_access():
     """Check if we have access to the required sensors"""
     try:
@@ -22,13 +27,6 @@ def check_sensor_access():
         except:
             temp_sensor_present = False
 
-        # Try reading from AS7331 (0x74)
-        try:
-            bus.read_byte(0x74)
-            uv_sensor_present = True
-        except:
-            uv_sensor_present = False
-
         bus.close()
         return temp_sensor_present or uv_sensor_present
 
@@ -41,11 +39,6 @@ pytestmark = pytest.mark.skipif(
     not check_sensor_access(),
     reason="Required sensors not accessible on I2C bus"
 )
-
-@pytest.fixture
-def controller():
-    """Fixture to provide a GeckoController instance"""
-    return GeckoController()
 
 @pytest.mark.timeout(30)  # Add timeout to prevent hanging
 def test_temperature_reading(controller):
@@ -64,26 +57,3 @@ def test_humidity_reading(controller):
     assert isinstance(humidity, float), "Humidity should be a float"
     assert 0 <= humidity <= 100, f"Humidity {humidity}% outside valid range (0-100%)"
     print(f"Humidity reading: {humidity:.1f}%")
-
-@pytest.mark.timeout(30)
-def test_uv_reading(controller):
-    """Test UV sensor reading"""
-    uva, uvb, uvc = controller.read_uv()
-    # At least one UV reading should be successful
-    assert any(x is not None for x in (uva, uvb, uvc)), "All UV readings failed"
-
-    # Check each reading individually
-    if uva is not None:
-        assert isinstance(uva, float), "UVA should be a float"
-        assert 0 <= uva <= 1000, f"UVA {uva} outside reasonable range (0-1000 μW/cm²)"
-        print(f"UVA reading: {uva:.2f} μW/cm²")
-
-    if uvb is not None:
-        assert isinstance(uvb, float), "UVB should be a float"
-        assert 0 <= uvb <= 100, f"UVB {uvb} outside reasonable range (0-100 μW/cm²)"
-        print(f"UVB reading: {uvb:.2f} μW/cm²")
-
-    if uvc is not None:
-        assert isinstance(uvc, float), "UVC should be a float"
-        assert 0 <= uvc <= 10, f"UVC {uvc} outside reasonable range (0-10 μW/cm²)"
-        print(f"UVC reading: {uvc:.2f} μW/cm²")

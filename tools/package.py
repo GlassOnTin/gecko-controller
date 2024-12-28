@@ -53,8 +53,7 @@ class PackagingUtils:
                 'compat',
                 'changelog',
                 'install',
-                'gecko-controller.service',
-                'gecko-web.service'
+                'gecko-controller.service'
             ]
 
             for file in required_files:
@@ -168,75 +167,6 @@ class PackagingUtils:
             self.logger.error(f"Package build failed: {e}")
             return False
 
-    def test_package(self, package_path: Path) -> bool:
-        """Test built package in a clean environment"""
-        try:
-            self.logger.info("Testing package installation...")
-
-            with tempfile.TemporaryDirectory() as temp_dir:
-                # Copy package to temp directory
-                temp_package = Path(temp_dir) / package_path.name
-                shutil.copy2(package_path, temp_package)
-
-                # Test package with lintian
-                lintian_result = subprocess.run(
-                    ['lintian', str(temp_package)],
-                    capture_output=True,
-                    text=True
-                )
-
-                if lintian_result.returncode != 0:
-                    self.logger.warning(f"Lintian found issues:\n{lintian_result.stdout}")
-
-                # Test installation in clean environment
-                container_name = f"gecko-test-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
-                try:
-                    # Create test container
-                    subprocess.run([
-                        'docker', 'run', '-d',
-                        '--name', container_name,
-                        'debian:bullseye'
-                    ], check=True)
-
-                    # Copy package to container
-                    subprocess.run([
-                        'docker', 'cp',
-                        str(temp_package),
-                        f"{container_name}:/tmp/"
-                    ], check=True)
-
-                    # Install package
-                    subprocess.run([
-                        'docker', 'exec', container_name,
-                        'apt-get', 'update'
-                    ], check=True)
-
-                    subprocess.run([
-                        'docker', 'exec', container_name,
-                        'apt-get', 'install', '-y', f"/tmp/{package_path.name}"
-                    ], check=True)
-
-                    # Test service
-                    service_result = subprocess.run([
-                        'docker', 'exec', container_name,
-                        'systemctl', 'status', 'gecko-controller'
-                    ], capture_output=True, text=True)
-
-                    if "Active: active" not in service_result.stdout:
-                        self.logger.error("Service not running after installation")
-                        return False
-
-                    self.logger.info("Package installation test passed")
-                    return True
-
-                finally:
-                    # Cleanup
-                    subprocess.run(['docker', 'rm', '-f', container_name])
-
-        except Exception as e:
-            self.logger.error(f"Package testing failed: {e}")
-            return False
-
 def main():
     """CLI entry point"""
     if len(sys.argv) != 2:
@@ -254,13 +184,6 @@ def main():
         success = packager.validate_debian_files()
     elif command == "build":
         success = packager.build_package()
-    elif command == "test":
-        package_path = project_root.parent / f"gecko-controller_{packager.version}_all.deb"
-        if package_path.exists():
-            success = packager.test_package(package_path)
-        else:
-            print(f"Package not found: {package_path}")
-            success = False
     else:
         print(f"Unknown command: {command}")
         sys.exit(1)

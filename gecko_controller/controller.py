@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import asyncio
 import os
 import sys
 import time
@@ -42,60 +43,45 @@ if config is None:
 
 class GeckoController:
     def __init__(self, test_mode=False):
-        # Get all config values at initialization
         self.config = config
+        self.test_mode = test_mode
 
-        # Skip hardware initialization in test mode
-        if not test_mode:
-            # GPIO Setup
-            GPIO.setmode(GPIO.BCM)
-            GPIO.setwarnings(False)  # Disable GPIO warnings
-            GPIO.setup(self.config.LIGHT_RELAY, GPIO.OUT)
-            GPIO.setup(self.config.HEAT_RELAY, GPIO.OUT)
-
-            if hasattr(self.config, 'DISPLAY_RESET'):
-                GPIO.setup(self.config.DISPLAY_RESET, GPIO.OUT)
-                GPIO.output(self.config.DISPLAY_RESET, GPIO.HIGH)
-
+        if not self.test_mode:
+            self.display_socket = DisplaySocketServer()
+            self.setup_gpio()
             self.setup_display()
             self.setup_logging()
             self.last_log_time = 0
             self.bus = smbus2.SMBus(1)
-
-            # Setup UV sensor
-            self.uv_sensor = None
             self.setup_uv_sensor()
-
-            # Create display components
-            self.image = Image.new('1', (128, 64), 255)  # 255 = white background
+            self.image = Image.new('1', (128, 64), 255)
             self.draw = ImageDraw.Draw(self.image)
-            self.display_socket = DisplaySocketServer()
-
-            # Load fonts
             self.regular_font = self.load_font("DejaVuSans.ttf", 10)
             self.icon_font = self.load_font("Symbola_hint.ttf", 12)
 
-        # Non-hardware dependent initialization
-        # Convert time settings from config to datetime.time objects
         self.light_on_time = self.parse_time_setting(self.config.LIGHT_ON_TIME)
         self.light_off_time = self.parse_time_setting(self.config.LIGHT_OFF_TIME)
-
-        # Use thresholds from config
         self.UVA_THRESHOLDS = self.config.UVA_THRESHOLDS
         self.UVB_THRESHOLDS = self.config.UVB_THRESHOLDS
-
-        # Calculate UV correction factor
         self.uv_correction_factor = self.calculate_uv_correction()
 
-        # OpenSymbol Unicode points for relevant symbols
         self.ICON_CLOCK = "⏲"
-        self.ICON_HUMIDITY = "🌢"         # for humidity
+        self.ICON_HUMIDITY = "🌢"
         self.ICON_THERMOMETER = "🌡"
         self.ICON_TARGET = "🞋"
         self.ICON_GOOD = "☺"
         self.ICON_TOO_LOW = "🌜"
         self.ICON_TOO_HIGH = "⚠"
         self.ICON_ERROR = "?"
+
+    def setup_gpio(self):
+        GPIO.setmode(GPIO.BCM)
+        GPIO.setwarnings(False)
+        GPIO.setup(self.config.LIGHT_RELAY, GPIO.OUT)
+        GPIO.setup(self.config.HEAT_RELAY, GPIO.OUT)
+        if hasattr(self.config, 'DISPLAY_RESET'):
+            GPIO.setup(self.config.DISPLAY_RESET, GPIO.OUT)
+            GPIO.output(self.config.DISPLAY_RESET, GPIO.HIGH)
 
     # Font loading helper
     def load_font(self, name: str, size: int) -> ImageFont.FreeTypeFont:
@@ -383,25 +369,21 @@ class GeckoController:
             print(f"Sensor read error: {e}")
             return None, None
 
-    def read_uv(self) -> Tuple[Optional[float], Optional[float], Optional[float]]:
+    async def read_uv(self) -> Tuple[Optional[float], Optional[float], Optional[float]]:
         """Read UV values from the sensor and apply geometric correction"""
         try:
             if self.uv_sensor is None:
-                print(f"UV sensor is None")
+                print("UV sensor is None")
                 return None, None, None
-            uva, uvb, uvc, temp = self.uv_sensor.values            
-            
-            # Apply correction factor
+            uva, uvb, uvc, temp = self.uv_sensor.values
+
             if uva is not None:
                 uva = uva * self.uv_correction_factor
-            else:
-                print(f"UV sensor read error")
-                
             if uvb is not None:
                 uvb = uvb * self.uv_correction_factor
             if uvc is not None:
                 uvc = uvc * self.uv_correction_factor
-            
+
             return uva, uvb, uvc
         except Exception as e:
             print(f"UV sensor read error: {e}")
@@ -434,38 +416,36 @@ class GeckoController:
             return False
         return GPIO.input(self.config.HEAT_RELAY)
 
-    def update_display(self, temp, humidity, uva, uvb, uvc, light_status, heat_status):
-        """Update the display with current readings"""
+    async def update_display(self, temp, humidity, uva, uvb, uvc, light_status, heat_status):
         self.create_display_group(temp, humidity, uva, uvb, uvc, light_status, heat_status)
-        self.display_socket.send_image(self.image)
+        await self.display_socket.send_image(self.image)
 
-    def run(self):
-        """Main control loop"""
+    async def run(self):
         try:
-            self.update_display(None, None, None, None, None, False, False)
+            await self.update_display(None, None, None, None, None, False, False)
+            await self.display_socket.start()
 
             while True:
                 temp, humidity = self.read_sensor()
-                uva, uvb, uvc = self.read_uv()
+                uva, uvb, uvc = await self.read_uv()
                 light_status = self.control_light()
                 heat_status = self.control_heat(temp)
-                #print(temp,humidity,uva, uvb, uvc, light_status, heat_status)
 
                 if temp is not None and humidity is not None:
-                    self.update_display(temp, humidity, uva, uvb, uvc,
-                                      light_status, heat_status)
-                    self.log_readings(temp, humidity, uva, uvb, uvc,
-                                    light_status, heat_status)
-                time.sleep(10)
+                    await self.update_display(temp, humidity, uva, uvb, uvc, light_status, heat_status)
+                    self.log_readings(temp, humidity, uva, uvb, uvc, light_status, heat_status)
+                await asyncio.sleep(10)
 
         except KeyboardInterrupt:
             print("\nShutting down...")
         finally:
             GPIO.cleanup()
+            await self.display_socket.stop()
 
-def main():
+
+async def main():
     controller = GeckoController()
-    controller.run()
+    await controller.run()
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
