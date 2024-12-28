@@ -57,71 +57,63 @@ def load_font(name: str, size: int) -> ImageFont.FreeTypeFont:
         return ImageFont.load_default()
 
 class GeckoController:
-    def __init__(self):
-        # GPIO Setup
-        GPIO.setmode(GPIO.BCM)
-        GPIO.setup(LIGHT_RELAY, GPIO.OUT)
-        GPIO.setup(HEAT_RELAY, GPIO.OUT)
+    def __init__(self, test_mode=False):
+        # Skip hardware initialization in test mode
+        if not test_mode:
+            # GPIO Setup
+            GPIO.setmode(GPIO.BCM)
+            GPIO.setwarnings(False)  # Disable GPIO warnings
+            GPIO.setup(LIGHT_RELAY, GPIO.OUT)
+            GPIO.setup(HEAT_RELAY, GPIO.OUT)
 
-        if hasattr(self, 'DISPLAY_RESET'):
-            GPIO.setup(DISPLAY_RESET, GPIO.OUT)
-            GPIO.output(DISPLAY_RESET, GPIO.HIGH)  # Start with reset inactive
+            if hasattr(self, 'DISPLAY_RESET'):
+                GPIO.setup(DISPLAY_RESET, GPIO.OUT)
+                GPIO.output(DISPLAY_RESET, GPIO.HIGH)  # Start with reset inactive
 
-        self.setup_display()
-        self.setup_logging()
-        self.last_log_time = 0
-        self.bus = smbus2.SMBus(1)
+            self.setup_display()
+            self.setup_logging()
+            self.last_log_time = 0
+            self.bus = smbus2.SMBus(1)
 
+            # Setup UV sensor
+            self.uv_sensor = None
+            self.setup_uv_sensor()
+
+            # Create display components
+            self.image = Image.new('1', (128, 64), 255)  # 255 = white background
+            self.draw = ImageDraw.Draw(self.image)
+            self.display_socket = DisplaySocketServer()
+
+            # Load fonts
+            self.regular_font = load_font("DejaVuSans.ttf", 10)
+            try:
+                self.icon_font = ImageFont.truetype("/usr/share/fonts/truetype/ancient-scripts/Symbola_hint.ttf", 12)
+            except Exception as e:
+                print(f"Warning: Could not load Symbola font from default path: {e}")
+                print(f"Please install the fonts-symbola package")
+                self.icon_font = ImageFont.load_default()
+                print("Using default font")
+
+        # Non-hardware dependent initialization
         # Convert time settings from config to datetime.time objects
         self.light_on_time = self.parse_time_setting(LIGHT_ON_TIME)
         self.light_off_time = self.parse_time_setting(LIGHT_OFF_TIME)
-        print(f"Light on @ {self.light_on_time}, Light off @ {self.light_off_time}\n")
 
         # Use thresholds from config
         self.UVA_THRESHOLDS = UVA_THRESHOLDS
         self.UVB_THRESHOLDS = UVB_THRESHOLDS
-        print(f"UVA Thresholds = {self.UVA_THRESHOLDS}, UVB Thresholds = {self.UVB_THRESHOLDS}\n")
 
         # Calculate UV correction factor
         self.uv_correction_factor = self.calculate_uv_correction()
-        print(f"\nUV Correction Factor: {self.uv_correction_factor:.3f}")
-        print(f"Sensor Position: {SENSOR_HEIGHT}m height, {LAMP_DIST_FROM_BACK}m from back")
-        print(f"Lamp Height: {ENCLOSURE_HEIGHT}m, Sensor Angle: {SENSOR_ANGLE}°\n")
-
-        # Setup UV sensor
-        self.uv_sensor = None
-        self.setup_uv_sensor()
-
-        if self.uv_sensor:
-            print("UV Sensor (AS7331) ready")
-            print(f"  measurement mode: {self.uv_sensor.measurement_mode_as_string}")
-            print(f"  standby state:    {self.uv_sensor.standby_state}")
-
-        # Create an image buffer
-        self.image = Image.new('1', (128, 64), 255)  # 255 = white background
-        self.draw = ImageDraw.Draw(self.image)
-        self.display_socket = DisplaySocketServer()
-
-        # Load regular font
-        self.regular_font = load_font("DejaVuSans.ttf", 10)
-
-        # Load OpenSymbol font
-        try:
-            self.icon_font = ImageFont.truetype("/usr/share/fonts/truetype/ancient-scripts/Symbola_hint.ttf", 12)
-        except Exception as e:
-            print(f"Warning: Could not load Symbola font from default path: {e}")
-            print(f"Please install the fonts-symbola package")
-            self.icon_font = ImageFont.load_default()
-            print("Using default font")
 
         # OpenSymbol Unicode points for relevant symbols
-        self.ICON_CLOCK = "⏲"       
-        self.ICON_HUMIDITY = "🌢"         # for humidity 
-        self.ICON_THERMOMETER = "🌡"  
-        self.ICON_TARGET = "🞋"      
-        self.ICON_GOOD = "☺"       
-        self.ICON_TOO_LOW = "🌜"     
-        self.ICON_TOO_HIGH = "⚠"    
+        self.ICON_CLOCK = "⏲"
+        self.ICON_HUMIDITY = "🌢"         # for humidity
+        self.ICON_THERMOMETER = "🌡"
+        self.ICON_TARGET = "🞋"
+        self.ICON_GOOD = "☺"
+        self.ICON_TOO_LOW = "🌜"
+        self.ICON_TOO_HIGH = "⚠"
         self.ICON_ERROR = "?"
 
     def setup_uv_sensor(self):
@@ -257,30 +249,47 @@ class GeckoController:
         minutes = int((diff.total_seconds() % 3600) // 60)
         return f"{hours}h{minutes:02d}m"
 
-    def calculate_uv_correction(self):
-        """Calculate UV correction factor based on geometry"""       
-        # Calculate distances and angles
-        sensor_to_lamp_horiz = LAMP_DIST_FROM_BACK  # horizontal distance from sensor to lamp
-        sensor_to_lamp_vert = ENCLOSURE_HEIGHT - SENSOR_HEIGHT  # vertical distance
-        
-        # Direct distance from sensor to lamp
-        direct_distance = math.sqrt(sensor_to_lamp_horiz**2 + sensor_to_lamp_vert**2)
-        
-        # Angle between sensor normal and lamp
-        lamp_angle = math.degrees(math.atan2(sensor_to_lamp_vert, sensor_to_lamp_horiz))
-        effective_angle = abs(lamp_angle - SENSOR_ANGLE)
-        
-        # Cosine correction for sensor angle
-        cosine_factor = math.cos(math.radians(effective_angle))
-        
-        # Inverse square law correction for distance
-        # Normalize to a reference height of 30cm (typical basking height)
-        distance_factor = (0.3 / direct_distance)**2
-        
-        # Combined correction factor
-        correction_factor = 1 / (cosine_factor * distance_factor)
-        
-        return correction_factor
+    def calculate_uv_correction(self, sensor_height=None, lamp_dist=None, enclosure_height=None, sensor_angle=None):
+            """
+            Calculate UV correction factor based on geometry
+
+            Args:
+                sensor_height (float, optional): Height of sensor in meters
+                lamp_dist (float, optional): Distance from back wall in meters
+                enclosure_height (float, optional): Height of enclosure in meters
+                sensor_angle (float, optional): Angle of sensor in degrees
+
+            Returns:
+                float: Correction factor for UV readings
+            """
+            # Use provided values or fall back to config values
+            sensor_height = sensor_height if sensor_height is not None else SENSOR_HEIGHT
+            lamp_dist = lamp_dist if lamp_dist is not None else LAMP_DIST_FROM_BACK
+            enclosure_height = enclosure_height if enclosure_height is not None else ENCLOSURE_HEIGHT
+            sensor_angle = sensor_angle if sensor_angle is not None else SENSOR_ANGLE
+
+            # Calculate distances and angles
+            sensor_to_lamp_horiz = lamp_dist  # horizontal distance from sensor to lamp
+            sensor_to_lamp_vert = enclosure_height - sensor_height  # vertical distance
+
+            # Direct distance from sensor to lamp
+            direct_distance = math.sqrt(sensor_to_lamp_horiz**2 + sensor_to_lamp_vert**2)
+
+            # Angle between sensor normal and lamp
+            lamp_angle = math.degrees(math.atan2(sensor_to_lamp_vert, sensor_to_lamp_horiz))
+            effective_angle = abs(lamp_angle - sensor_angle)
+
+            # Cosine correction for sensor angle
+            cosine_factor = math.cos(math.radians(effective_angle))
+
+            # Inverse square law correction for distance
+            # Normalize to a reference height of 30cm (typical basking height)
+            distance_factor = (0.3 / direct_distance)**2
+
+            # Combined correction factor
+            correction_factor = 1 / (cosine_factor * distance_factor)
+
+            return correction_factor
 
     def get_uv_status_icon(self, value: Optional[float], is_uvb: bool = False) -> str:
         """Get status icon for UV readings"""

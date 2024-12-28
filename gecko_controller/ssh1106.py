@@ -3,22 +3,52 @@ import smbus2
 from PIL import Image
 
 class SSH1106Display:
-    def __init__(self, i2c_addr=0x3C, width=128, height=64):
+    def __init__(self, i2c_addr=0x3C, baudrate=10000):
         self.addr = i2c_addr
-        self.width = width
-        self.height = height
-        self.pages = height // 8
-        self.buffer = [0] * (width * self.pages)
         self.consecutive_errors = 0
         self.MAX_RETRY_COUNT = 3
         self.retry_delay = 0.1  # seconds
 
         print(f"Initializing SSH1106 Display on i2c address 0x{i2c_addr:02x}")
-        print(f"Display size: {width}x{height} in {self.pages} pages")
+        print(f"Display size: 128x64 in 8 pages")
+
+        # Set up I2C with specified baudrate
+        import os
+        if os.path.exists('/sys/class/i2c-adapter/i2c-1/speed'):
+            try:
+                with open('/sys/class/i2c-adapter/i2c-1/speed', 'w') as f:
+                    f.write(str(baudrate))
+            except Exception as e:
+                print(f"Warning: Could not set I2C speed: {e}")
 
         self.bus = smbus2.SMBus(1)
         time.sleep(0.1)  # Wait after bus initialization
         self.init_display()
+
+    def write_cmd(self, cmd, retries=3):
+        """Write a command to the display with retry logic and debugging"""
+        success = False
+        error = None
+
+        for attempt in range(retries):
+            try:
+                if attempt > 0:
+                    print(f"Retry {attempt} for command 0x{cmd:02x}")
+                    time.sleep(self.retry_delay * (attempt + 1))
+
+                self.bus.write_byte_data(self.addr, 0x00, cmd)
+                time.sleep(0.001)  # 1ms delay between commands
+                success = True
+                break
+
+            except Exception as e:
+                error = e
+                print(f"Command 0x{cmd:02x} failed (attempt {attempt + 1}): {e}")
+
+        if not success:
+            raise IOError(f"Failed to write command 0x{cmd:02x} after {retries} attempts: {error}")
+
+        return success
 
     def write_with_retry(self, reg, data, is_cmd=True):
         """Write to I2C with retry logic and bus recovery"""
@@ -59,13 +89,6 @@ class SSH1106Display:
             time.sleep(0.1)
         except Exception as e:
             print(f"Bus recovery failed: {e}")
-
-    def write_cmd(self, cmd):
-        """Write a command to the display with retry logic"""
-        success = self.write_with_retry(0x00, cmd, is_cmd=True)
-        if success:
-            time.sleep(0.001)  # 1ms delay between commands
-        return success
 
     def write_data(self, data):
         """Write data to the display with retry logic"""

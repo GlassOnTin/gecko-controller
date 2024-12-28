@@ -26,7 +26,8 @@ setup(
     extras_require={
         'test': [
             'pytest',
-            'RPi.GPIO',  # explicitly include hardware dependencies for tests
+            'pytest-timeout',  # Add this line
+            'RPi.GPIO',
             'smbus2',
         ]
     },
