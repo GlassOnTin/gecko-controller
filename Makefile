@@ -36,7 +36,16 @@ package:
 	$(PYTHON) tools/build.py package
 
 # Development targets
-.PHONY: dev install-deps
+.PHONY: dev install-deps dev-web dev-controller
+
+dev: install-deps
+	cd gecko_controller/web/static && npm run dev
+
+dev-web: activate
+	sudo $(PYTHON_VENV) -m gecko_controller.web.app
+
+dev-controller: activate
+	sudo $(PYTHON_VENV) -m gecko_controller.controller
 
 dev: install-deps
 	cd gecko_controller/web/static && npm run dev

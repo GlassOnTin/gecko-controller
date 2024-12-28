@@ -13,6 +13,7 @@ from pathlib import Path
 import importlib.util
 from typing import Dict, Any, Tuple
 from typing import Tuple, Optional
+import asyncio
 import logging
 
 # Configure logging
@@ -830,7 +831,7 @@ def get_logs():
 
 # Modify the display endpoints to include logging
 @app.route('/api/display', methods=['GET'])
-def get_display():
+async def get_display():
     """Get current OLED display image as base64 PNG"""
     logger.debug("Display endpoint accessed")
 
@@ -838,7 +839,7 @@ def get_display():
         client = DisplaySocketClient()
         logger.debug("Created DisplaySocketClient")
 
-        success, image_data, error = client.get_image()
+        success, image_data, error = await client.get_image()
         logger.debug(f"Got response - success: {success}, error: {error}")
 
         if success:
@@ -894,7 +895,7 @@ def add_header(response):
     
 def main():
     app.logger.info('Starting Flask application...')
-    app.run(host='0.0.0.0', port=80)
+    app.run(host='0.0.0.0', port=8080)
     logger.debug(f"Available routes: {[str(p) for p in app.url_map.iter_rules()]}")
     log_startup_info()
 
