@@ -1,27 +1,37 @@
-# Gecko Controller Build System
+# Makefile
+SHELL := /bin/bash
 PYTHON := python3
-BUILD_SCRIPT := tools/build.py
+VENV := venv
+PIP := $(VENV)/bin/pip
+PYTEST := $(VENV)/bin/pytest
+PYTHON_VENV := $(VENV)/bin/python
 
 .PHONY: all clean build test package build-frontend build-backend
 
 all: clean build test package
 
-clean:
-	$(PYTHON) $(BUILD_SCRIPT) clean
+clean: clean-venv
+	$(PYTHON) tools/build.py clean
 
 build: build-frontend build-backend
 
 build-frontend:
-	$(PYTHON) $(BUILD_SCRIPT) frontend
+	$(PYTHON) tools/build.py frontend
 
 build-backend:
-	$(PYTHON) $(BUILD_SCRIPT) backend
+	$(PYTHON) tools/build.py backend
 
-test:
-	$(PYTHON) $(BUILD_SCRIPT) test
+test: $(VENV)/bin/activate
+	source $(VENV)/bin/activate && $(PYTEST) tests/
+
+$(VENV)/bin/activate:
+	@echo "Creating virtual environment..."
+	$(PYTHON) -m venv $(VENV)
+	@echo "Installing dependencies..."
+	$(PIP) install -e ".[test]"
 
 package:
-	$(PYTHON) $(BUILD_SCRIPT) package
+	$(PYTHON) tools/build.py package
 
 # Development targets
 .PHONY: dev install-deps
@@ -29,8 +39,7 @@ package:
 dev: install-deps
 	cd gecko_controller/web/static && npm run dev
 
-install-deps:
-	$(PYTHON) -m pip install -r build/config/requirements.txt
+install-deps: $(VENV)/bin/activate
 	cd gecko_controller/web/static && npm install
 
 # Utility targets
@@ -61,3 +70,9 @@ help:
 	@echo "Utility targets:"
 	@echo "  version-check - Verify version consistency"
 	@echo "  version-bump  - Bump version numbers"
+
+# Clean virtual environment
+.PHONY: clean-venv
+clean-venv:
+	@echo "Removing virtual environment..."
+	rm -rf $(VENV)

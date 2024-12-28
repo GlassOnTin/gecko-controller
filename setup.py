@@ -6,7 +6,7 @@ setup(
     packages=find_namespace_packages(include=[
         'gecko_controller*',
         'tests*'
-    ]),  # Remove the exclude
+    ]),
     package_data={
         "gecko_controller": [
             "fonts/*.pcf",
@@ -23,6 +23,13 @@ setup(
         "Flask>=2.2.2",
         "adafruit-circuitpython-busdevice"
     ],
+    extras_require={
+        'test': [
+            'pytest',
+            'RPi.GPIO',  # explicitly include hardware dependencies for tests
+            'smbus2',
+        ]
+    },
     python_requires=">=3.9",
     entry_points={
         "console_scripts": [

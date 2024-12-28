@@ -11,7 +11,7 @@ log() {
 }
 
 configure_i2c() {
-    CONFIG="/boot/config.txt"
+    CONFIG="/boot/firmware/config.txt"
     if [ -f "$CONFIG" ]; then
         # Remove any existing i2c_arm settings
         sed -i '/^dtparam=i2c_arm/d' "$CONFIG"
@@ -20,9 +20,9 @@ configure_i2c() {
         echo "# Modified by gecko-controller for long I2C cables" >> "$CONFIG"
         echo "dtparam=i2c_arm=on,i2c_arm_baudrate=10000" >> "$CONFIG"
 
-        log "I2C configuration updated in /boot/config.txt"
+        log "I2C configuration updated in /boot/firmware/config.txt"
     else
-        log "Warning: /boot/config.txt not found - manual I2C configuration may be needed"
+        log "Warning: /boot/firmware/config.txt not found - manual I2C configuration may be needed"
     fi
 }
 

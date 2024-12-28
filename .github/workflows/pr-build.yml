@@ -15,20 +15,20 @@ jobs:
 
       - name: Make scripts executable
         run: |
-          chmod +x build.sh tools/verify-versions.sh
+          chmod +x tools/verify-versions.sh
 
       - name: Verify versions
         run: tools/verify-versions.sh
 
       - name: Build package
-        run: ./build.sh
+        run: make all
 
       - name: Move build artifacts to workspace
         run: |
           mkdir -p artifacts
-          cp ../gecko-controller_*.deb artifacts/
-          cp ../gecko-controller_*.buildinfo artifacts/
-          cp ../gecko-controller_*.changes artifacts/
+          cp ../*.deb artifacts/
+          cp ../*.buildinfo artifacts/
+          cp ../*.changes artifacts/
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
