@@ -3,10 +3,10 @@ d28a75f93e5bb3aae070ea64da5242db  lib/systemd/system/gecko-web.service
 cbff2329a7c7573f727870d23ab84ac0  usr/lib/python3/dist-packages/gecko_controller/__init__.py
 1207b9b60540d3d5fc2c8ae4d45d1df3  usr/lib/python3/dist-packages/gecko_controller/as7331.py
 155db741df4e86ecb9a2de19a228f79b  usr/lib/python3/dist-packages/gecko_controller/config_loader.py
-a5d1dbca828befb891dc5a252a28820c  usr/lib/python3/dist-packages/gecko_controller/controller.py
+ac841ed99d4d37f07c13278c971d619d  usr/lib/python3/dist-packages/gecko_controller/controller.py
 6affe036217630159b133d5d7d0aa395  usr/lib/python3/dist-packages/gecko_controller/display_socket.py
 335b1ddc84f6b9c3493f626e25ef959d  usr/lib/python3/dist-packages/gecko_controller/fonts/forkawesome-12.pcf
-4634f9a83507a8b8c6addf21e689e35c  usr/lib/python3/dist-packages/gecko_controller/ssh1106.py
+49c608e30b567324d43d879528a69ac7  usr/lib/python3/dist-packages/gecko_controller/ssh1106.py
 d41d8cd98f00b204e9800998ecf8427e  usr/lib/python3/dist-packages/gecko_controller/web/__init__.py
 92cc376acb6436f9be9c5703c8e8dcbc  usr/lib/python3/dist-packages/gecko_controller/web/app.py
 0d8804210e27c054cde0b23db8db8f9e  usr/lib/python3/dist-packages/gecko_controller/web/static/components/LiveDisplay.jsx

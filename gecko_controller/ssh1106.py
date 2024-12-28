@@ -23,13 +23,51 @@ class SSH1106Display:
     def __init__(self, i2c_addr=0x3C):
         if self._initialized:
             return
-
         with self._lock:
             self.addr = i2c_addr
             self.pages = 8
             self.width = 128
             self.height = 64
-            self._initialized = True
+            try:
+                self.bus = smbus2.SMBus(1)
+                self._initialized = True
+            except Exception as e:
+                print(f"Failed to initialize I2C bus: {e}")
+                self._initialized = False
+
+    def write_cmd(self, cmd: int, retries: int = 3) -> bool:
+        """
+        Write a command byte to the display with error handling and retries.
+
+        Args:
+            cmd: The command byte to send (0-255)
+            retries: Number of retry attempts for transient errors
+
+        Returns:
+            bool: True if successful, False if failed
+        """
+        if not self._initialized:
+            return False
+
+        for attempt in range(retries):
+            try:
+                with self._lock:
+                    self.bus.write_byte_data(self.addr, 0x00, cmd)
+                    time.sleep(0.001)  # 1ms delay between commands
+                    return True
+            except Exception as e:
+                if attempt == retries - 1:  # Only print on final attempt
+                    print(f"Error in write_cmd (attempt {attempt + 1}/{retries}): {e}")
+                time.sleep(0.01)  # Short delay before retry
+        return False
+
+    def __del__(self):
+        """Cleanup method to properly close the I2C bus"""
+        if hasattr(self, 'bus'):
+            try:
+                self.bus.close()
+            except:
+                pass
 
     def show_image(self, image: Image.Image) -> bool:
         """Display a PIL Image object with thread safety and error handling"""

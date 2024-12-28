@@ -2,7 +2,7 @@ Package: gecko-controller
 Version: 0.8.4
 Architecture: all
 Maintainer: Ian Ross Williams <ianrosswilliams@gmail.com>
-Installed-Size: 415
+Installed-Size: 416
 Depends: python3:any, python3-pip, python3-venv, python3 (>= 3.9), python3-rpi.gpio, python3-lgpio, python3-pillow, python3-smbus, python3-flask (>= 2.2.2), i2c-tools
 Section: misc
 Priority: optional

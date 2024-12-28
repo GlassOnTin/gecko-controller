@@ -420,9 +420,6 @@ class GeckoController:
         schedule_width = self.draw.textlength(schedule_text, font=self.regular_font)
         self.draw.text((124 - schedule_width, 52), schedule_text, font=self.regular_font, fill=0)
 
-        # Update the display
-        self.display.show_image(self.image)
-
     def log_readings(self, temp, humidity, uva, uvb, uvc, light_status, heat_status):
         """Log readings if enough time has passed"""
         current_time = time.time()
