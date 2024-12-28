@@ -302,3 +302,4 @@ debian/gecko-controller/DEBIAN/
 debian/gecko-controller/
 debian/.debhelper/
 debian/gecko-controller.postinst.debhelper debian/gecko-controller.postrm.debhelper debian/gecko-controller.prerm.debhelper debian/gecko-controller.service debian/gecko-controller.sh debian/gecko-controller.substvars
+debian/debhelper-build-stamp

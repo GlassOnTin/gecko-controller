@@ -195,37 +195,66 @@ class DisplaySocketClient(ImageSocketBase):
         """Get current display image with retry logic"""
         for attempt in range(self.config.max_retries):
             try:
+                # First check if socket exists
+                if not os.path.exists(self.config.socket_path):
+                    self.logger.error(f"Socket not found at {self.config.socket_path}")
+                    return False, None, f"Socket not found at {self.config.socket_path}"
+
+                # Check socket permissions
+                try:
+                    socket_stat = os.stat(self.config.socket_path)
+                    self.logger.debug(f"Socket permissions: {oct(socket_stat.st_mode)}")
+                except OSError as e:
+                    self.logger.error(f"Cannot stat socket: {e}")
+
                 with self._lock:
-                    reader, writer = await asyncio.open_unix_connection(
-                        path=self.config.socket_path
-                    )
-
-                    length_bytes = await reader.read(4)
-                    if not length_bytes:
+                    try:
+                        reader, writer = await asyncio.open_unix_connection(
+                            path=self.config.socket_path
+                        )
+                    except ConnectionRefusedError:
+                        self.logger.error("Connection refused - is the display server running?")
+                        await asyncio.sleep(1)  # Wait before retry
                         continue
+                    except PermissionError:
+                        self.logger.error("Permission denied accessing socket")
+                        return False, None, "Permission denied accessing display socket"
 
-                    msg_length = int.from_bytes(length_bytes, byteorder='big')
-                    data = await reader.read(msg_length)
+                    try:
+                        length_bytes = await reader.read(4)
+                        if not length_bytes:
+                            self.logger.warning("No data received from socket")
+                            continue
 
-                    response = json.loads(data.decode())
+                        msg_length = int.from_bytes(length_bytes, byteorder='big')
+                        data = await reader.read(msg_length)
 
-                    if response['status'] != 'success':
-                        raise ValueError(response.get('error', 'Unknown error'))
+                        response = json.loads(data.decode())
 
-                    image_data = base64.b64decode(response['image'])
-                    self._validate_image(image_data)
+                        if response['status'] != 'success':
+                            raise ValueError(response.get('error', 'Unknown error'))
 
-                    return True, Image.open(BytesIO(image_data)), None
+                        if 'image' not in response:
+                            self.logger.warning("No image in response")
+                            return False, None, "No image available"
+
+                        image_data = base64.b64decode(response['image'])
+                        self._validate_image(image_data)
+
+                        return True, Image.open(BytesIO(image_data)), None
+
+                    except Exception as e:
+                        self.logger.error(f"Error reading from socket: {e}")
+                        raise
+
+                    finally:
+                        writer.close()
+                        await writer.wait_closed()
 
             except Exception as e:
-                self.logger.warning(f"Attempt {attempt + 1} failed: {e}")
-                if attempt == self.config.max_retries - 1:
-                    return False, None, str(e)
-
-            finally:
-                if writer:
-                    writer.close()
-                    await writer.wait_closed()
+                self.logger.error(f"Attempt {attempt + 1} failed: {str(e)}")
+                await asyncio.sleep(1)  # Wait before retry
+                continue
 
         return False, None, "Max retries exceeded"
 

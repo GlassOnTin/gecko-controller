@@ -829,7 +829,6 @@ def get_logs():
             
     return jsonify(data)
 
-# Modify the display endpoints to include logging
 @app.route('/api/display', methods=['GET'])
 async def get_display():
     """Get current OLED display image as base64 PNG"""
@@ -838,6 +837,14 @@ async def get_display():
     try:
         client = DisplaySocketClient()
         logger.debug("Created DisplaySocketClient")
+
+        # Get display socket status first
+        status = await client.get_status()  # We need to add this method
+        if not status['socket_exists']:
+            return jsonify({
+                'status': 'error',
+                'message': f"Display socket not found. Expected at: {status['socket_path']}"
+            }), 503
 
         success, image_data, error = await client.get_image()
         logger.debug(f"Got response - success: {success}, error: {error}")
@@ -848,10 +855,12 @@ async def get_display():
                 'image': image_data
             })
         else:
-            logger.error(f"Failed to get image: {error}")
+            error_msg = error or 'Failed to get display image'
+            logger.error(f"Failed to get image: {error_msg}")
             return jsonify({
                 'status': 'error',
-                'message': error or 'Failed to get display image'
+                'message': error_msg,
+                'socket_status': status  # Include socket status in error response
             }), 500
 
     except Exception as e:
@@ -861,7 +870,6 @@ async def get_display():
             'message': f'Internal error: {str(e)}'
         }), 500
 
-# Add this new endpoint to check service status
 @app.route('/api/display/status', methods=['GET'])
 def get_display_status():
     """Check status of display socket connection"""

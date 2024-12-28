@@ -518,34 +518,36 @@ class GeckoController:
             self.logger.error(f"Cleanup error: {e}")
 
     async def run(self):
-        """Main run loop with resilient display handling"""
         try:
-            # Initialize display socket first
             await self.setup_socket()
-
-            # Initial display update - don't fail if display is unavailable
             await self.update_display(None, None, None, None, None, False, False)
 
             while True:
-                temp, humidity = self.read_sensor()
-                uva, uvb, uvc = await self.read_uv()
+                try:
+                    temp, humidity = self.read_sensor()
+                except Exception as e:
+                    self.logger.error(f"Error reading temperature sensor: {e}")
+                    temp, humidity = None, None
+
+                try:
+                    uva, uvb, uvc = await self.read_uv()
+                except Exception as e:
+                    self.logger.error(f"Error reading UV sensor: {e}")
+                    uva, uvb, uvc = None, None, None
+
                 light_status = self.control_light()
                 heat_status = self.control_heat(temp)
 
-                if temp is not None and humidity is not None:
-                    await self.update_display(temp, humidity, uva, uvb, uvc,
+                # Always update display, even if sensors fail
+                await self.update_display(temp, humidity, uva, uvb, uvc,
                                         light_status, heat_status)
+
+                # Log readings if we have any valid data
+                if any(x is not None for x in [temp, humidity, uva, uvb, uvc]):
                     self.log_readings(temp, humidity, uva, uvb, uvc,
                                     light_status, heat_status)
+
                 await asyncio.sleep(10)
-
-        except KeyboardInterrupt:
-            self.logger.info("\nShutting down...")
-        except Exception as e:
-            self.logger.error(f"Fatal error: {e}")
-        finally:
-            await self.cleanup()
-
 async def main():
     try:
         # Set up logging
