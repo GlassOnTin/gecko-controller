@@ -299,3 +299,4 @@ dist
 .yarn/install-state.gz
 .pnp.*
 debian/gecko-controller/DEBIAN/
+debian/gecko-controller/
