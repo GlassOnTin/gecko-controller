@@ -59,6 +59,10 @@ configure_system() {
     touch /var/log/gecko-controller/readings.csv
     chown gecko-controller:gpio /var/log/gecko-controller/readings.csv
     chmod 644 /var/log/gecko-controller/readings.csv
+
+    touch /var/log/gecko-controller/web-debug.log
+    chown gecko-controller:gpio /var/log/gecko-controller/web-debug.log
+    chmod 644 /var/log/gecko-controller/web-debug.log
 }
 
 case "$1" in

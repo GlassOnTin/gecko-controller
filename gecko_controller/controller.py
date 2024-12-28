@@ -122,11 +122,11 @@ class GeckoController:
             # Always create the display image for the socket interface
             self.create_display_group(temp, humidity, uva, uvb, uvc, light_status, heat_status)
 
-            # Try physical display if available
-            if self.display and self.display.is_available:
+            # Try physical display
+            if self.display:
                 self.display.show_image(self.image)
 
-            # Always try to update web interface
+            # Try to update web interface
             if self.display_socket:
                 await self.display_socket.send_image(self.image)
 
