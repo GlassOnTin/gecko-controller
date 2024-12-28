@@ -1,0 +1,16 @@
+[Unit]
+Description=Gecko Controller Web Interface
+After=gecko-controller.service
+
+[Service]
+Type=simple
+User=gecko-controller
+Group=gpio
+WorkingDirectory=/opt/gecko-controller
+Environment=PYTHONPATH=/usr/lib/python3/dist-packages
+ExecStart=/usr/bin/python3 -m gecko_controller.web.app
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

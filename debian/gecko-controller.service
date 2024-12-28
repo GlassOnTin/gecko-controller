@@ -3,17 +3,17 @@ Description=Gecko Vivarium Controller
 After=network.target
 
 [Service]
-Type=notify
-User=root
-Group=root
-WorkingDirectory=/opt/gecko-controller
+Type=simple
+User=gecko-controller
+Group=gpio
+WorkingDirectory=/var/run/gecko-controller
 RuntimeDirectory=gecko-controller
 LogsDirectory=gecko-controller
 StateDirectory=gecko-controller
 ConfigurationDirectory=gecko-controller
+ConfigurationDirectoryMode=0750
 Environment=PYTHONPATH=/usr/lib/python3/dist-packages
 ExecStart=/usr/bin/python3 -m gecko_controller.controller
-ExecStartPost=/usr/bin/python3 -m gecko_controller.web.app
 Restart=on-failure
 RestartSec=10
 

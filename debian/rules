@@ -31,7 +31,8 @@ override_dh_auto_install:
 	# Install configuration and service files
 	install -m0644 debian/config.py debian/gecko-controller/etc/gecko-controller/config.py
 	install -m0644 debian/gecko-controller.service debian/gecko-controller/lib/systemd/system/
+	install -m0644 debian/gecko-web.service debian/gecko-controller/lib/systemd/system/
 
-	# Install web assets - do this explicitly rather than through setuptools
+	# Install web assets
 	cp -r gecko_controller/web/static/dist/* debian/gecko-controller/usr/share/gecko-controller/web/static/
 	cp -r gecko_controller/web/templates/* debian/gecko-controller/usr/share/gecko-controller/web/templates/

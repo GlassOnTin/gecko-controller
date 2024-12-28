@@ -11,12 +11,12 @@ from threading import Lock
 
 @dataclass
 class SocketConfig:
-    socket_path: str = "/tmp/gecko-display.sock"
+    socket_path: str = "/var/run/gecko-controller/display.sock"
     chunk_size: int = 4096
     timeout: int = 2
     max_retries: int = 3
-    permissions: int = 0o600  # More restrictive permissions
-    max_size: int = 10 * 1024 * 1024  # 10MB limit
+    permissions: int = 0o660
+    max_size: int = 10 * 1024 * 1024
     compression_quality: int = 85
 
 class ImageSocketBase:
@@ -24,6 +24,15 @@ class ImageSocketBase:
         self.config = config or SocketConfig()
         self.logger = logging.getLogger(__name__)
         self._lock = Lock()
+
+        # Ensure socket directory exists with proper permissions
+        socket_dir = os.path.dirname(self.config.socket_path)
+        try:
+            if not os.path.exists(socket_dir):
+                os.makedirs(socket_dir, mode=0o755, exist_ok=True)
+        except Exception as e:
+            self.logger.error(f"Failed to create socket directory: {e}")
+            raise
 
     def _compress_image(self, image: Image.Image) -> bytes:
         with BytesIO() as buffer:
@@ -48,17 +57,27 @@ class DisplaySocketServer(ImageSocketBase):
         self._cleanup_socket()
         self.server = None
 
+        # Ensure socket directory exists with correct permissions
+        socket_dir = os.path.dirname(self.config.socket_path)
+        if not os.path.exists(socket_dir):
+            os.makedirs(socket_dir, mode=0o755)
+
     def _cleanup_socket(self) -> None:
-        with self._lock:
+        """Safely clean up the socket file"""
+        try:
             if os.path.exists(self.config.socket_path):
                 os.unlink(self.config.socket_path)
+        except (PermissionError, OSError) as e:
+            self.logger.warning(f"Could not remove existing socket: {e}")
+            # Don't raise - just log warning
 
     async def start(self):
         self.server = await asyncio.start_unix_server(
             self._handle_client,
             path=self.config.socket_path
         )
-        os.chmod(self.config.socket_path, self.config.permissions)
+        # Make socket accessible to web service user
+        os.chmod(self.config.socket_path, 0o666)
         self.logger.info(f"Server listening on {self.config.socket_path}")
 
     async def _handle_client(self, reader, writer):

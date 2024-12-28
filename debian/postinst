@@ -32,17 +32,33 @@ configure_system() {
         adduser --quiet --system --home /var/lib/gecko-controller --group gecko-controller
     fi
 
-    # Add gecko-controller user to required groups
-    usermod -a -G gpio,i2c,dialout gecko-controller || true
+    # Add to required groups - only add to groups that exist
+    for group in gpio i2c dialout; do
+        if getent group $group > /dev/null; then
+            usermod -a -G $group gecko-controller || true
+        fi
+    done
 
     # Create required directories with proper permissions
-    install -d -m 755 -o gecko-controller -g gecko-controller /var/lib/gecko-controller
-    install -d -m 755 -o gecko-controller -g gecko-controller /var/log/gecko-controller
+    install -d -m 755 -o gecko-controller -g gpio /var/lib/gecko-controller
+    install -d -m 755 -o gecko-controller -g gpio /var/log/gecko-controller
+    install -d -m 755 -o gecko-controller -g gpio /var/run/gecko-controller
 
     # Ensure config directory permissions are correct
-    chown -R gecko-controller:gecko-controller /etc/gecko-controller
+    chown -R gecko-controller:gpio /etc/gecko-controller
     chmod 750 /etc/gecko-controller
     chmod 640 /etc/gecko-controller/config.py
+
+    # Set GPIO device permissions if they exist
+    if [ -e /dev/gpiomem ]; then
+        chmod 660 /dev/gpiomem
+        chown root:gpio /dev/gpiomem
+    fi
+
+    # Create and set permissions for log file
+    touch /var/log/gecko-controller/readings.csv
+    chown gecko-controller:gpio /var/log/gecko-controller/readings.csv
+    chmod 644 /var/log/gecko-controller/readings.csv
 }
 
 case "$1" in
@@ -61,18 +77,31 @@ case "$1" in
 
             # Enable and start services
             systemctl enable gecko-controller.service || true
+            systemctl enable gecko-web.service || true
+
             systemctl restart gecko-controller.service || true
+            sleep 2  # Give controller time to initialize
+            systemctl restart gecko-web.service || true
         fi
 
         log "Post-installation configuration completed"
         ;;
 
     abort-upgrade|abort-remove|abort-deconfigure)
-        ;;
-
-    *)
         echo "postinst called with unknown argument \`$1'" >&2
         exit 1
+        ;;
+
+    remove|purge)
+        # Stop and disable the services
+        systemctl stop gecko-web || true
+        systemctl disable gecko-web || true
+        systemctl stop gecko-controller || true
+        systemctl disable gecko-controller || true
+
+        # Remove the virtual environment
+        rm -rf "$VENV_DIR"
+
         ;;
 esac
 

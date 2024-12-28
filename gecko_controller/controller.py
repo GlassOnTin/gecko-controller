@@ -4,8 +4,11 @@ import os
 import sys
 import time
 import math
+import pwd
+import grp
 import smbus2
 import RPi.GPIO as GPIO
+import traceback
 import logging
 import logging.handlers
 from datetime import datetime, timedelta, time as datetime_time
@@ -45,9 +48,9 @@ class GeckoController:
     def __init__(self, test_mode=False):
         self.config = config
         self.test_mode = test_mode
+        self.display_socket = None
 
         if not self.test_mode:
-            self.display_socket = DisplaySocketServer()
             self.setup_gpio()
             self.setup_display()
             self.setup_logging()
@@ -75,13 +78,35 @@ class GeckoController:
         self.ICON_ERROR = "?"
 
     def setup_gpio(self):
-        GPIO.setmode(GPIO.BCM)
-        GPIO.setwarnings(False)
-        GPIO.setup(self.config.LIGHT_RELAY, GPIO.OUT)
-        GPIO.setup(self.config.HEAT_RELAY, GPIO.OUT)
-        if hasattr(self.config, 'DISPLAY_RESET'):
-            GPIO.setup(self.config.DISPLAY_RESET, GPIO.OUT)
-            GPIO.output(self.config.DISPLAY_RESET, GPIO.HIGH)
+        """Set up GPIO with proper error handling"""
+        try:
+            GPIO.setmode(GPIO.BCM)
+            GPIO.setwarnings(False)
+
+            # Check GPIO access
+            if not os.access("/dev/gpiomem", os.R_OK | os.W_OK):
+                raise PermissionError("No access to /dev/gpiomem. Ensure user is in gpio group.")
+
+            # Set up pins
+            for pin in [self.config.LIGHT_RELAY, self.config.HEAT_RELAY]:
+                GPIO.setup(pin, GPIO.OUT)
+                GPIO.output(pin, GPIO.LOW)  # Initialize to OFF
+
+            if hasattr(self.config, 'DISPLAY_RESET'):
+                GPIO.setup(self.config.DISPLAY_RESET, GPIO.OUT)
+                GPIO.output(self.config.DISPLAY_RESET, GPIO.HIGH)
+
+        except Exception as e:
+            self.logger.error(f"GPIO setup failed: {e}")
+            raise
+
+    def setup_display(self):
+        """Initialize the OLED display"""
+        try:
+            self.display = SSH1106Display(i2c_addr=self.config.DISPLAY_ADDRESS)
+        except Exception as e:
+            self.logger.error(f"Failed to initialize display: {e}")
+            raise
 
     # Font loading helper
     def load_font(self, name: str, size: int) -> ImageFont.FreeTypeFont:
@@ -150,41 +175,70 @@ class GeckoController:
             return datetime_time(0, 0)
             
     def setup_logging(self):
-        """Configure logging with rotation"""
-        os.makedirs(LOG_DIR, exist_ok=True)
-        log_file = Path(LOG_DIR + "/" + LOG_FILE)
+        """Configure logging with rotation and proper permissions"""
+        try:
+            # Get user/group IDs first
+            uid = pwd.getpwnam("gecko-controller").pw_uid
+            gid = grp.getgrnam("gpio").gr_gid
 
-        # Configure main logger for system messages
-        self.logger = logging.getLogger("gecko_controller")
-        self.logger.setLevel(logging.INFO)
+            # Ensure log directory exists with proper permissions
+            if not os.path.exists(LOG_DIR):
+                os.makedirs(LOG_DIR, mode=0o755)
+                # Set ownership
+                os.chown(LOG_DIR, uid, gid)
 
-        # Configure readings logger for sensor data
-        self.readings_logger = logging.getLogger("gecko_controller.readings")
-        self.readings_logger.setLevel(logging.INFO)
+            log_file = Path(LOG_DIR + "/" + LOG_FILE)
 
-        # Create rotating file handler for readings
-        readings_handler = logging.handlers.RotatingFileHandler(
-            log_file,
-            maxBytes=MAX_LOG_SIZE,
-            backupCount=LOG_BACKUP_COUNT
-        )
+            # If log file exists, ensure proper permissions
+            if log_file.exists():
+                os.chown(log_file, uid, gid)
+                os.chmod(log_file, 0o644)
 
-        # Create formatter for readings
-        readings_formatter = logging.Formatter(
-            '%(asctime)s,%(temp).1f,%(humidity).1f,%(uva).4f,%(uvb).4f,%(uvc).4f,%(light)d,%(heat)d'
-        )
-        readings_handler.setFormatter(readings_formatter)
-        self.readings_logger.addHandler(readings_handler)
+            # Rest of the logging setup remains the same...
+            # Configure main logger for system messages
+            self.logger = logging.getLogger("gecko_controller")
+            self.logger.setLevel(logging.INFO)
 
-        # Create console handler for system messages
-        console_handler = logging.StreamHandler()
-        console_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-        console_handler.setFormatter(console_formatter)
-        self.logger.addHandler(console_handler)
+            # Configure readings logger for sensor data
+            self.readings_logger = logging.getLogger("gecko_controller.readings")
+            self.readings_logger.setLevel(logging.INFO)
 
-    def setup_display(self):
-        """Initialize the display"""
-        self.display = SSH1106Display(i2c_addr=self.config.DISPLAY_ADDRESS)
+            # Create rotating file handler for readings
+            readings_handler = logging.handlers.RotatingFileHandler(
+                log_file,
+                maxBytes=MAX_LOG_SIZE,
+                backupCount=LOG_BACKUP_COUNT,
+                mode='a'  # append mode
+            )
+
+            # Create formatter for readings
+            readings_formatter = logging.Formatter(
+                '%(asctime)s,%(temp).1f,%(humidity).1f,%(uva).4f,%(uvb).4f,%(uvc).4f,%(light)d,%(heat)d'
+            )
+            readings_handler.setFormatter(readings_formatter)
+            self.readings_logger.addHandler(readings_handler)
+
+            # Create console handler for system messages
+            console_handler = logging.StreamHandler()
+            console_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+            console_handler.setFormatter(console_formatter)
+            self.logger.addHandler(console_handler)
+
+            # Ensure all new log files get correct permissions
+            if log_file.exists():
+                os.chown(log_file, uid, gid)
+                os.chmod(log_file, 0o644)
+
+        except Exception as e:
+            print(f"Error setting up logging: {e}")
+            raise
+
+    async def setup_socket(self):
+        """Initialize display socket server if not already running"""
+        if self.display_socket is None:
+            self.display_socket = DisplaySocketServer()
+            await self.display_socket.start()
+            self.logger.info("Display socket server initialized and started")
 
     def get_next_transition(self) -> Tuple[str, datetime]:
         """Calculate time until next light state change"""
@@ -422,8 +476,11 @@ class GeckoController:
 
     async def run(self):
         try:
+            # Initialize display socket first
+            await self.setup_socket()
+
+            # Initial display update
             await self.update_display(None, None, None, None, None, False, False)
-            await self.display_socket.start()
 
             while True:
                 temp, humidity = self.read_sensor()
@@ -437,15 +494,43 @@ class GeckoController:
                 await asyncio.sleep(10)
 
         except KeyboardInterrupt:
-            print("\nShutting down...")
+            self.logger.info("\nShutting down...")
         finally:
             GPIO.cleanup()
-            await self.display_socket.stop()
+            if self.display_socket:
+                await self.display_socket.stop()
 
 
 async def main():
-    controller = GeckoController()
-    await controller.run()
+    try:
+        # Set up logging
+        logging.basicConfig(
+            level=logging.INFO,
+            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+        )
+        logger = logging.getLogger('gecko_controller')
+
+        # Ensure we're running as the correct user
+        if os.geteuid() == 0:
+            logger.warning("Running as root, checking permissions...")
+            runtime_dir = "/var/run/gecko-controller"
+            log_dir = "/var/log/gecko-controller"
+
+            # Ensure directories exist with correct permissions
+            for directory in [runtime_dir, log_dir]:
+                if not os.path.exists(directory):
+                    os.makedirs(directory, mode=0o755, exist_ok=True)
+                    uid = pwd.getpwnam("gecko-controller").pw_uid
+                    gid = grp.getgrnam("gpio").gr_gid
+                    os.chown(directory, uid, gid)
+
+        controller = GeckoController()
+        await controller.run()
+
+    except Exception as e:
+        logger.error(f"Fatal error: {e}")
+        traceback.print_exc()
+        sys.exit(1)
 
 if __name__ == "__main__":
     asyncio.run(main())
