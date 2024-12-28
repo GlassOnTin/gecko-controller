@@ -20,6 +20,7 @@ if project_root not in sys.path:
 
 from gecko_controller.ssh1106 import SSH1106Display
 from gecko_controller.display_socket import DisplaySocketServer
+from gecko_controller.config_loader import load_config
 
 # Constants for logging
 LOG_DIR = "/var/log/gecko-controller"
@@ -31,44 +32,30 @@ LOG_INTERVAL = 60  # seconds
 # Get the directory where the module is installed
 MODULE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# Import config
-try:
-    from gecko_controller.config import *
-except ImportError:
-    try:
-        import sys
-        sys.path.append('/etc/gecko-controller')
-        from config import *
-    except ImportError:
-        print("Error: Could not find configuration file")
-        print("The file should be at: /etc/gecko-controller/config.py")
-        print("Try reinstalling the package with: sudo apt install --reinstall gecko-controller")
-       
+# Load config before class definition
+config = load_config()
+if config is None:
+    if __name__ == "__main__":
         sys.exit(1)
-
-# Font loading helper
-def load_font(name: str, size: int) -> ImageFont.FreeTypeFont:
-    """Load a font, falling back to default if not found"""
-    try:
-        font_path = pathlib.Path(MODULE_DIR) / "fonts" / name
-        return ImageFont.truetype(str(font_path), size)
-    except Exception as e:
-        print(f"Warning: Could not load font {name}: {e}")
-        return ImageFont.load_default()
+    else:
+        raise ImportError("No configuration found")
 
 class GeckoController:
     def __init__(self, test_mode=False):
+        # Get all config values at initialization
+        self.config = config
+
         # Skip hardware initialization in test mode
         if not test_mode:
             # GPIO Setup
             GPIO.setmode(GPIO.BCM)
             GPIO.setwarnings(False)  # Disable GPIO warnings
-            GPIO.setup(LIGHT_RELAY, GPIO.OUT)
-            GPIO.setup(HEAT_RELAY, GPIO.OUT)
+            GPIO.setup(self.config.LIGHT_RELAY, GPIO.OUT)
+            GPIO.setup(self.config.HEAT_RELAY, GPIO.OUT)
 
-            if hasattr(self, 'DISPLAY_RESET'):
-                GPIO.setup(DISPLAY_RESET, GPIO.OUT)
-                GPIO.output(DISPLAY_RESET, GPIO.HIGH)  # Start with reset inactive
+            if hasattr(self.config, 'DISPLAY_RESET'):
+                GPIO.setup(self.config.DISPLAY_RESET, GPIO.OUT)
+                GPIO.output(self.config.DISPLAY_RESET, GPIO.HIGH)
 
             self.setup_display()
             self.setup_logging()
@@ -85,23 +72,17 @@ class GeckoController:
             self.display_socket = DisplaySocketServer()
 
             # Load fonts
-            self.regular_font = load_font("DejaVuSans.ttf", 10)
-            try:
-                self.icon_font = ImageFont.truetype("/usr/share/fonts/truetype/ancient-scripts/Symbola_hint.ttf", 12)
-            except Exception as e:
-                print(f"Warning: Could not load Symbola font from default path: {e}")
-                print(f"Please install the fonts-symbola package")
-                self.icon_font = ImageFont.load_default()
-                print("Using default font")
+            self.regular_font = self.load_font("DejaVuSans.ttf", 10)
+            self.icon_font = self.load_font("Symbola_hint.ttf", 12)
 
         # Non-hardware dependent initialization
         # Convert time settings from config to datetime.time objects
-        self.light_on_time = self.parse_time_setting(LIGHT_ON_TIME)
-        self.light_off_time = self.parse_time_setting(LIGHT_OFF_TIME)
+        self.light_on_time = self.parse_time_setting(self.config.LIGHT_ON_TIME)
+        self.light_off_time = self.parse_time_setting(self.config.LIGHT_OFF_TIME)
 
         # Use thresholds from config
-        self.UVA_THRESHOLDS = UVA_THRESHOLDS
-        self.UVB_THRESHOLDS = UVB_THRESHOLDS
+        self.UVA_THRESHOLDS = self.config.UVA_THRESHOLDS
+        self.UVB_THRESHOLDS = self.config.UVB_THRESHOLDS
 
         # Calculate UV correction factor
         self.uv_correction_factor = self.calculate_uv_correction()
@@ -115,6 +96,16 @@ class GeckoController:
         self.ICON_TOO_LOW = "🌜"
         self.ICON_TOO_HIGH = "⚠"
         self.ICON_ERROR = "?"
+
+    # Font loading helper
+    def load_font(self, name: str, size: int) -> ImageFont.FreeTypeFont:
+        """Load a font, falling back to default if not found"""
+        try:
+            font_path = pathlib.Path(MODULE_DIR) / "fonts" / name
+            return ImageFont.truetype(str(font_path), size)
+        except Exception as e:
+            print(f"Warning: Could not load font {name}: {e}")
+            return ImageFont.load_default()
 
     def setup_uv_sensor(self):
         """Set up the UV sensor with appropriate configuration"""
@@ -207,7 +198,7 @@ class GeckoController:
 
     def setup_display(self):
         """Initialize the display"""
-        self.display = SSH1106Display(i2c_addr=DISPLAY_ADDRESS)
+        self.display = SSH1106Display(i2c_addr=self.config.DISPLAY_ADDRESS)
 
     def get_next_transition(self) -> Tuple[str, datetime]:
         """Calculate time until next light state change"""
@@ -250,46 +241,46 @@ class GeckoController:
         return f"{hours}h{minutes:02d}m"
 
     def calculate_uv_correction(self, sensor_height=None, lamp_dist=None, enclosure_height=None, sensor_angle=None):
-            """
-            Calculate UV correction factor based on geometry
+        """
+        Calculate UV correction factor based on geometry
 
-            Args:
-                sensor_height (float, optional): Height of sensor in meters
-                lamp_dist (float, optional): Distance from back wall in meters
-                enclosure_height (float, optional): Height of enclosure in meters
-                sensor_angle (float, optional): Angle of sensor in degrees
+        Args:
+            sensor_height (float, optional): Height of sensor in meters
+            lamp_dist (float, optional): Distance from back wall in meters
+            enclosure_height (float, optional): Height of enclosure in meters
+            sensor_angle (float, optional): Angle of sensor in degrees
 
-            Returns:
-                float: Correction factor for UV readings
-            """
-            # Use provided values or fall back to config values
-            sensor_height = sensor_height if sensor_height is not None else SENSOR_HEIGHT
-            lamp_dist = lamp_dist if lamp_dist is not None else LAMP_DIST_FROM_BACK
-            enclosure_height = enclosure_height if enclosure_height is not None else ENCLOSURE_HEIGHT
-            sensor_angle = sensor_angle if sensor_angle is not None else SENSOR_ANGLE
+        Returns:
+            float: Correction factor for UV readings
+        """
+        # Use provided values or fall back to config values
+        sensor_height = sensor_height if sensor_height is not None else self.config.SENSOR_HEIGHT
+        lamp_dist = lamp_dist if lamp_dist is not None else self.config.LAMP_DIST_FROM_BACK
+        enclosure_height = enclosure_height if enclosure_height is not None else self.config.ENCLOSURE_HEIGHT
+        sensor_angle = sensor_angle if sensor_angle is not None else self.config.SENSOR_ANGLE
 
-            # Calculate distances and angles
-            sensor_to_lamp_horiz = lamp_dist  # horizontal distance from sensor to lamp
-            sensor_to_lamp_vert = enclosure_height - sensor_height  # vertical distance
+        # Calculate distances and angles
+        sensor_to_lamp_horiz = lamp_dist  # horizontal distance from sensor to lamp
+        sensor_to_lamp_vert = enclosure_height - sensor_height  # vertical distance
 
-            # Direct distance from sensor to lamp
-            direct_distance = math.sqrt(sensor_to_lamp_horiz**2 + sensor_to_lamp_vert**2)
+        # Direct distance from sensor to lamp
+        direct_distance = math.sqrt(sensor_to_lamp_horiz**2 + sensor_to_lamp_vert**2)
 
-            # Angle between sensor normal and lamp
-            lamp_angle = math.degrees(math.atan2(sensor_to_lamp_vert, sensor_to_lamp_horiz))
-            effective_angle = abs(lamp_angle - sensor_angle)
+        # Angle between sensor normal and lamp
+        lamp_angle = math.degrees(math.atan2(sensor_to_lamp_vert, sensor_to_lamp_horiz))
+        effective_angle = abs(lamp_angle - sensor_angle)
 
-            # Cosine correction for sensor angle
-            cosine_factor = math.cos(math.radians(effective_angle))
+        # Cosine correction for sensor angle
+        cosine_factor = math.cos(math.radians(effective_angle))
 
-            # Inverse square law correction for distance
-            # Normalize to a reference height of 30cm (typical basking height)
-            distance_factor = (0.3 / direct_distance)**2
+        # Inverse square law correction for distance
+        # Normalize to a reference height of 30cm (typical basking height)
+        distance_factor = (0.3 / direct_distance)**2
 
-            # Combined correction factor
-            correction_factor = 1 / (cosine_factor * distance_factor)
+        # Combined correction factor
+        correction_factor = 1 / (cosine_factor * distance_factor)
 
-            return correction_factor
+        return correction_factor
 
     def get_uv_status_icon(self, value: Optional[float], is_uvb: bool = False) -> str:
         """Get status icon for UV readings"""
@@ -419,13 +410,13 @@ class GeckoController:
     def get_target_temp(self) -> float:
         """Get the current target temperature based on time of day"""
         current_time = datetime.now().time()
-        return DAY_TEMP if self.light_on_time <= current_time < self.light_off_time else MIN_TEMP
+        return self.config.DAY_TEMP if self.light_on_time <= current_time < self.light_off_time else self.config.MIN_TEMP
 
     def control_light(self) -> bool:
         """Control the light relay based on time"""
         current_time = datetime.now().time()
         should_be_on = self.light_on_time <= current_time < self.light_off_time
-        GPIO.output(LIGHT_RELAY, GPIO.HIGH if should_be_on else GPIO.LOW)
+        GPIO.output(self.config.LIGHT_RELAY, GPIO.HIGH if should_be_on else GPIO.LOW)
         return should_be_on
  
     def control_heat(self, current_temp: Optional[float]) -> bool:
@@ -435,13 +426,13 @@ class GeckoController:
 
         target_temp = self.get_target_temp()
 
-        if current_temp < (target_temp - TEMP_TOLERANCE):
-            GPIO.output(HEAT_RELAY, GPIO.HIGH)
+        if current_temp < (target_temp - self.config.TEMP_TOLERANCE):
+            GPIO.output(self.config.HEAT_RELAY, GPIO.HIGH)
             return True
-        elif current_temp > (target_temp + TEMP_TOLERANCE):
-            GPIO.output(HEAT_RELAY, GPIO.LOW)
+        elif current_temp > (target_temp + self.config.TEMP_TOLERANCE):
+            GPIO.output(self.config.HEAT_RELAY, GPIO.LOW)
             return False
-        return GPIO.input(HEAT_RELAY)
+        return GPIO.input(self.config.HEAT_RELAY)
 
     def update_display(self, temp, humidity, uva, uvb, uvc, light_status, heat_status):
         """Update the display with current readings"""

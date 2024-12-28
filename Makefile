@@ -21,9 +21,11 @@ build-frontend:
 build-backend:
 	$(PYTHON) tools/build.py backend
 
-test: $(VENV)/bin/activate
-	source $(VENV)/bin/activate && $(PYTEST) tests/
+test: activate
+	$(PYTEST) tests/
 
+activate: $(VENV)/bin/activate
+	source $(VENV)/bin/activate
 $(VENV)/bin/activate:
 	@echo "Creating virtual environment..."
 	$(PYTHON) -m venv $(VENV)

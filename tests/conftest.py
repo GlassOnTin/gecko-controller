@@ -1,23 +1,59 @@
 import pytest
 import os
+import sys
 import smbus2
+from pathlib import Path
 import RPi.GPIO as GPIO
 
-def pytest_configure(config):
-    """Check hardware and add markers"""
-    is_raspberry_pi = check_raspberry_pi()
-    has_i2c = check_i2c_available()
-    has_gpio = check_gpio_available()
+# Add test config module to path
+test_dir = Path(__file__).parent
+sys.path.insert(0, str(test_dir))
 
-    # Register custom markers
+# Create mock config for tests
+def pytest_configure(config):
+    """Create a mock config module for testing"""
+    config_path = Path(__file__).parent / "config.py"
+
+    mock_config = """
+# Test configuration
+DISPLAY_ADDRESS = 0x3c
+LIGHT_RELAY = 17
+HEAT_RELAY = 4
+DISPLAY_RESET = 21
+MIN_TEMP = 15.0
+DAY_TEMP = 30.0
+TEMP_TOLERANCE = 1.0
+LIGHT_ON_TIME = "07:30"
+LIGHT_OFF_TIME = "19:30"
+UVA_THRESHOLDS = {
+    'low': 50.0,
+    'high': 100.0
+}
+UVB_THRESHOLDS = {
+    'low': 2.0,
+    'high': 5.0
+}
+SENSOR_HEIGHT = 0.2
+LAMP_DIST_FROM_BACK = 0.3
+ENCLOSURE_HEIGHT = 0.5
+SENSOR_ANGLE = 90
+"""
+    with open(config_path, 'w') as f:
+        f.write(mock_config)
+
+def pytest_unconfigure(config):
+    """Clean up test config"""
+    config_path = Path(__file__).parent / "config.py"
+    if config_path.exists():
+        config_path.unlink()
+
+# Add test marks
+def pytest_configure(config):
     config.addinivalue_line(
-        "markers", "requires_raspberry_pi: mark test that needs Raspberry Pi hardware"
+        "markers", "requires_display: mark test as requiring display hardware"
     )
     config.addinivalue_line(
-        "markers", "requires_i2c: mark test that needs I2C bus"
-    )
-    config.addinivalue_line(
-        "markers", "requires_gpio: mark test that needs GPIO access"
+        "markers", "requires_hardware: mark test as requiring hardware access"
     )
 
 def check_raspberry_pi():
