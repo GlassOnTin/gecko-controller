@@ -1,0 +1,4 @@
+./gecko_controller/web/static/dist/bundle.js
+./gecko_controller/web/static/components/LiveDisplay.jsx
+./gecko_controller/web/static/components/StatusMonitor.jsx
+./gecko_controller/web/templates/index.html
