@@ -108,6 +108,36 @@ class GeckoController:
             self.logger.error(f"Failed to initialize display: {e}")
             raise
 
+    async def update_display(self, temp, humidity, uva, uvb, uvc, light_status, heat_status):
+        """Update display with fallback to socket-only mode"""
+        if not hasattr(self, 'last_display_update'):
+            self.last_display_update = 0
+
+        # Rate limit display updates
+        current_time = time.time()
+        if current_time - self.last_display_update < 0.1:
+            return
+
+        try:
+            # Always create the display image for the socket interface
+            self.create_display_group(temp, humidity, uva, uvb, uvc, light_status, heat_status)
+
+            # Try physical display if available
+            if self.display and self.display.is_available:
+                self.display.show_image(self.image)
+
+            # Always try to update web interface
+            if self.display_socket:
+                await self.display_socket.send_image(self.image)
+
+            self.last_display_update = current_time
+
+        except Exception as e:
+            self.logger.error(f"Display update failed: {e}")
+            # Only retry initialization if significant time has passed
+            if current_time - self.last_display_update > 5:
+                self.setup_display()
+
     # Font loading helper
     def load_font(self, name: str, size: int) -> ImageFont.FreeTypeFont:
         """Load a font, falling back to default if not found"""
@@ -235,10 +265,14 @@ class GeckoController:
 
     async def setup_socket(self):
         """Initialize display socket server if not already running"""
-        if self.display_socket is None:
+        try:
+            # Get the singleton instance
             self.display_socket = DisplaySocketServer()
             await self.display_socket.start()
             self.logger.info("Display socket server initialized and started")
+        except Exception as e:
+            self.logger.error(f"Failed to initialize display socket: {e}")
+            self.display_socket = None
 
     def get_next_transition(self) -> Tuple[str, datetime]:
         """Calculate time until next light state change"""
@@ -470,16 +504,29 @@ class GeckoController:
             return False
         return GPIO.input(self.config.HEAT_RELAY)
 
-    async def update_display(self, temp, humidity, uva, uvb, uvc, light_status, heat_status):
-        self.create_display_group(temp, humidity, uva, uvb, uvc, light_status, heat_status)
-        await self.display_socket.send_image(self.image)
+    async def cleanup(self):
+        """Cleanup resources before shutdown"""
+        try:
+            # The display singleton will handle its own cleanup
+            self.display = None
+
+            # Stop the socket server if it exists
+            if self.display_socket:
+                await self.display_socket.stop()
+                self.display_socket = None
+
+            GPIO.cleanup()
+
+        except Exception as e:
+            self.logger.error(f"Cleanup error: {e}")
 
     async def run(self):
+        """Main run loop with resilient display handling"""
         try:
             # Initialize display socket first
             await self.setup_socket()
 
-            # Initial display update
+            # Initial display update - don't fail if display is unavailable
             await self.update_display(None, None, None, None, None, False, False)
 
             while True:
@@ -489,17 +536,18 @@ class GeckoController:
                 heat_status = self.control_heat(temp)
 
                 if temp is not None and humidity is not None:
-                    await self.update_display(temp, humidity, uva, uvb, uvc, light_status, heat_status)
-                    self.log_readings(temp, humidity, uva, uvb, uvc, light_status, heat_status)
+                    await self.update_display(temp, humidity, uva, uvb, uvc,
+                                        light_status, heat_status)
+                    self.log_readings(temp, humidity, uva, uvb, uvc,
+                                    light_status, heat_status)
                 await asyncio.sleep(10)
 
         except KeyboardInterrupt:
             self.logger.info("\nShutting down...")
+        except Exception as e:
+            self.logger.error(f"Fatal error: {e}")
         finally:
-            GPIO.cleanup()
-            if self.display_socket:
-                await self.display_socket.stop()
-
+            await self.cleanup()
 
 async def main():
     try:
