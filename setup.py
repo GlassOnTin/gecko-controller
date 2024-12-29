@@ -22,7 +22,7 @@ setup(
         "Pillow",
         "Flask>=2.2.2",
         "asyncio",
-        "adafruit-circuitpython-busdevice"
+        "adafruit-circuitpython-busdevice>=8.3.0"
     ],
     extras_require={
         'test': [

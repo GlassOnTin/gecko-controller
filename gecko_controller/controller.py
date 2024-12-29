@@ -51,6 +51,8 @@ class GeckoController:
         self.test_mode = test_mode
         self.display_socket = None
 
+        self.logger = logging.getLogger(__name__)
+
         if not self.test_mode:
             self.setup_gpio()
             self.setup_display()
@@ -150,44 +152,76 @@ class GeckoController:
             return ImageFont.load_default()
 
     def setup_uv_sensor(self):
-        """Set up the UV sensor with appropriate configuration"""
+        """Set up the AS7331 UV sensor with appropriate configuration"""
         try:
-            from gecko_controller.as7331 import (
-                AS7331,
-                INTEGRATION_TIME_256MS,
-                GAIN_16X,
-                MEASUREMENT_MODE_CONTINUOUS
-            )
-
+            # First attempt to import the module
             try:
+                from gecko_controller.as7331 import (
+                    AS7331,
+                    INTEGRATION_TIME_256MS,
+                    GAIN_16X,
+                    MEASUREMENT_MODE_CONTINUOUS
+                )
+            except ImportError as e:
+                self.logger.error(f"Failed to import AS7331 module: {e}")
+                self.uv_sensor = None
+                return
+
+            # Try to detect sensor on I2C bus
+            try:
+                # Try to scan I2C bus first
+                import subprocess
+                result = subprocess.run(['i2cdetect', '-y', '1'],
+                                    capture_output=True, text=True)
+                self.logger.debug(f"I2C bus scan:\n{result.stdout}")
+            except Exception as e:
+                self.logger.warning(f"Could not scan I2C bus: {e}")
+
+            # Initialize sensor
+            try:
+                self.logger.info("Initializing UV sensor...")
                 self.uv_sensor = AS7331(1)  # Initialize with I2C bus 1
+
+                # Configure sensor
                 self.uv_sensor.integration_time = INTEGRATION_TIME_256MS
                 self.uv_sensor.gain = GAIN_16X
                 self.uv_sensor.measurement_mode = MEASUREMENT_MODE_CONTINUOUS
 
+                # Save configuration
                 self.int_time = INTEGRATION_TIME_256MS
                 self.gain = GAIN_16X
                 self.meas_mode = MEASUREMENT_MODE_CONTINUOUS
 
-                print("\nUV Sensor (AS7331) initialized successfully")
-                print(f"  measurement mode: {self.uv_sensor.measurement_mode_as_string}")
-                print(f"  standby state:    {self.uv_sensor.standby_state}")
+                # Verify configuration
+                self.logger.info(
+                    f"UV Sensor initialized successfully:\n"
+                    f"  Measurement mode: {self.uv_sensor.measurement_mode_as_string}\n"
+                    f"  Integration time: {self.uv_sensor.integration_time_as_string}\n"
+                    f"  Gain: {self.uv_sensor.gain_as_string}\n"
+                    f"  Standby state: {self.uv_sensor.standby_state}"
+                )
+
+                # Test read
+                uva, uvb, uvc, temp = self.uv_sensor.values
+                self.logger.info(f"Initial readings - UVA: {uva}, UVB: {uvb}, UVC: {uvc}, Temp: {temp}")
 
             except Exception as e:
-                print(f"\nError initializing UV sensor hardware: {str(e)}")
-                print("Please check your I2C connections and addresses")
+                self.logger.error(f"Failed to initialize UV sensor: {e}")
+                self.logger.debug(f"Stack trace: {traceback.format_exc()}")
+                self.logger.info("Please check:\n"
+                            "1. I2C connections\n"
+                            "2. Sensor power\n"
+                            "3. I2C address conflicts\n"
+                            "4. Bus speed settings")
                 self.uv_sensor = None
                 self.int_time = None
                 self.gain = None
                 self.meas_mode = None
 
-        except ImportError as e:
-            print("\nWarning: UV sensor module (AS7331) not found")
-            print(f"Error: {str(e)}")
+        except Exception as e:
+            self.logger.error(f"Unexpected error in UV sensor setup: {e}")
+            self.logger.debug(f"Stack trace: {traceback.format_exc()}")
             self.uv_sensor = None
-            self.int_time = None
-            self.gain = None
-            self.meas_mode = None
 
     @staticmethod
     def parse_time_setting(time_str: str) -> datetime_time:
@@ -442,37 +476,129 @@ class GeckoController:
     def read_sensor(self) -> Tuple[Optional[float], Optional[float]]:
         """Read temperature and humidity from the sensor"""
         try:
-            self.bus.write_i2c_block_data(0x44, 0x2C, [0x06])
-            time.sleep(0.5)
-            data = self.bus.read_i2c_block_data(0x44, 0x00, 6)
+            # First check if bus is accessible at all
+            if not hasattr(self, 'bus') or self.bus is None:
+                self.logger.error("I2C bus not initialized")
+                return None, None
 
-            temp = data[0] * 256 + data[1]
-            cTemp = -45 + (175 * temp / 65535.0)
-            humidity = 100 * (data[3] * 256 + data[4]) / 65535.0
+            # Read with timeout protection
+            try:
+                # Try to write measurement command
+                self.bus.write_i2c_block_data(0x44, 0x2C, [0x06])
 
-            return cTemp, humidity
+                # Use shorter sleep - 100ms is typically enough for SHT31
+                time.sleep(0.1)
+
+                # Read data with retry
+                retries = 3
+                for attempt in range(retries):
+                    try:
+                        data = self.bus.read_i2c_block_data(0x44, 0x00, 6)
+                        break
+                    except OSError as e:
+                        if attempt == retries - 1:
+                            raise
+                        time.sleep(0.1)
+
+                # Convert raw data to temperature and humidity
+                temp = data[0] * 256 + data[1]
+                cTemp = -45 + (175 * temp / 65535.0)
+                humidity = 100 * (data[3] * 256 + data[4]) / 65535.0
+
+                # Basic sanity check on values
+                if not (-40 <= cTemp <= 125) or not (0 <= humidity <= 100):
+                    self.logger.warning(f"Sensor values out of range: T={cTemp}°C, RH={humidity}%")
+                    return None, None
+
+                self.logger.debug(f"Read sensor: T={cTemp:.1f}°C, RH={humidity:.1f}%")
+                return cTemp, humidity
+
+            except OSError as e:
+                self.logger.error(f"I2C communication error: {e}")
+                # Try to reset the I2C bus if we get repeated errors
+                try:
+                    self.bus.close()
+                    time.sleep(0.1)
+                    self.bus = smbus2.SMBus(1)
+                except Exception as reset_error:
+                    self.logger.error(f"Failed to reset I2C bus: {reset_error}")
+                return None, None
+
         except Exception as e:
-            print(f"Sensor read error: {e}")
+            self.logger.error(f"Sensor read error: {e}")
+            self.logger.debug(f"Stack trace: {traceback.format_exc()}")
             return None, None
 
     async def read_uv(self) -> Tuple[Optional[float], Optional[float], Optional[float]]:
-        """Read UV values from the sensor and apply geometric correction"""
+        """Read UV values from AS7331 sensor and apply geometric correction.
+
+        Returns:
+            Tuple of UVA, UVB, and UVC values in μW/cm², with geometric correction applied.
+            Any value may be None if reading fails.
+        """
         try:
             if self.uv_sensor is None:
-                print("UV sensor is None")
+                self.logger.error("UV sensor not initialized")
                 return None, None, None
-            uva, uvb, uvc, temp = self.uv_sensor.values
 
-            if uva is not None:
-                uva = uva * self.uv_correction_factor
-            if uvb is not None:
-                uvb = uvb * self.uv_correction_factor
-            if uvc is not None:
-                uvc = uvc * self.uv_correction_factor
+            # Maximum retries for sensor read
+            retries = 3
+            last_error = None
 
-            return uva, uvb, uvc
+            for attempt in range(retries):
+                try:
+                    # Get raw values with timeout protection
+                    uva, uvb, uvc, temp = self.uv_sensor.values
+
+                    # Validate raw readings
+                    if any(v is not None and (v < 0 or v > 1000000) for v in (uva, uvb, uvc)):
+                        self.logger.warning(f"UV values out of expected range: UVA={uva}, UVB={uvb}, UVC={uvc}")
+                        continue
+
+                    # Apply geometric correction and round to reasonable precision
+                    corrected_values = []
+                    for value in (uva, uvb, uvc):
+                        if value is not None:
+                            # Apply correction and round to 3 decimal places
+                            corrected = round(value * self.uv_correction_factor, 3)
+                            # Sanity check on corrected values
+                            if corrected > 100000:  # Unreasonably high UV
+                                self.logger.warning(f"Corrected UV value too high: {corrected} μW/cm²")
+                                corrected = None
+                        else:
+                            corrected = None
+                        corrected_values.append(corrected)
+
+                    self.logger.debug(
+                        f"UV readings - UVA: {corrected_values[0] if corrected_values[0] else 0:.1f} μW/cm², "
+                        f"UVB: {corrected_values[1] if corrected_values[1] else 0:.1f} μW/cm², "
+                        f"UVC: {corrected_values[2] if corrected_values[2] else 0:.1f} μW/cm²"
+                    )
+
+                    return tuple(corrected_values)  # type: ignore
+
+                except Exception as e:
+                    last_error = e
+                    self.logger.warning(f"UV sensor read attempt {attempt + 1}/{retries} failed: {e}")
+                    if attempt < retries - 1:
+                        await asyncio.sleep(0.5)  # Short delay between retries
+                    continue
+
+            # If we get here, all retries failed
+            if last_error:
+                self.logger.error(f"UV sensor read failed after {retries} attempts: {last_error}")
+                # Try to recover sensor
+                try:
+                    self.setup_uv_sensor()
+                    self.logger.info("UV sensor reinitialized after failures")
+                except Exception as reinit_error:
+                    self.logger.error(f"Failed to reinitialize UV sensor: {reinit_error}")
+
+            return None, None, None
+
         except Exception as e:
-            print(f"UV sensor read error: {e}")
+            self.logger.error(f"Unexpected error reading UV sensor: {e}")
+            self.logger.debug(f"Stack trace: {traceback.format_exc()}")
             return None, None, None
 
     def get_target_temp(self) -> float:
@@ -525,14 +651,14 @@ class GeckoController:
             await self.setup_socket()
             self.logger.info("Starting control and display tasks")
 
-            # Create both tasks
-            tasks = [
+            # Store tasks so we can cancel them during cleanup
+            self.tasks = [
                 asyncio.create_task(self.display_socket.serve_forever(), name='socket_server'),
                 asyncio.create_task(self.control_loop(), name='control_loop')
             ]
 
-            # Run both tasks concurrently
-            await asyncio.gather(*tasks)
+            # Run until cancelled
+            await asyncio.gather(*self.tasks)
 
         except asyncio.CancelledError:
             self.logger.info("Received shutdown signal")
@@ -547,9 +673,13 @@ class GeckoController:
         self.logger.info("Starting control loop")
         while True:
             try:
+                self.logger.info("Beginning control loop iteration")  # Add this
                 self.logger.debug("Reading temperature sensor...")
                 temp, humidity = self.read_sensor()
-                self.logger.debug(f"Temperature: {temp}°C, Humidity: {humidity}%")
+                if temp is None or humidity is None:
+                    self.logger.error("Failed to read temperature/humidity")
+                else:
+                    self.logger.info(f"Temperature: {temp:.2f}°C, Humidity: {humidity:.2f}%")
             except Exception as e:
                 self.logger.error(f"Error reading temperature sensor: {e}")
                 temp, humidity = None, None
@@ -580,6 +710,40 @@ class GeckoController:
             self.logger.debug("Waiting for next update cycle...")
             await asyncio.sleep(10)
 
+    async def cleanup(self):
+        """Cleanup resources before shutdown"""
+        try:
+            self.logger.info("Starting cleanup...")
+
+            # Cancel all running tasks
+            for task in self.tasks:
+                if not task.done():
+                    self.logger.info(f"Cancelling task: {task.get_name()}")
+                    task.cancel()
+                    try:
+                        await task
+                    except asyncio.CancelledError:
+                        pass
+
+            # The display singleton will handle its own cleanup
+            self.display = None
+
+            # Stop the socket server if it exists
+            if self.display_socket:
+                self.logger.info("Stopping display socket...")
+                await self.display_socket.stop()
+                self.display_socket = None
+
+            # Cleanup GPIO
+            self.logger.info("Cleaning up GPIO...")
+            GPIO.cleanup()
+
+            self.logger.info("Cleanup completed")
+
+        except Exception as e:
+            self.logger.error(f"Cleanup error: {e}")
+
+
 async def main():
     try:
         # Set up logging
@@ -609,20 +773,33 @@ async def main():
 
         # Set up signal handlers
         loop = asyncio.get_running_loop()
-        for sig in (signal.SIGTERM, signal.SIGINT):
-            loop.add_signal_handler(sig, lambda: asyncio.create_task(controller.cleanup()))
 
-        # Run the controller
-        await controller.run()
+        # Create an event for shutdown coordination
+        shutdown_event = asyncio.Event()
+
+        def signal_handler():
+            logger.info("Received shutdown signal")
+            shutdown_event.set()
+
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            loop.add_signal_handler(sig, signal_handler)
+
+        # Run the controller until shutdown signal
+        try:
+            await controller.run()
+        except asyncio.CancelledError:
+            pass
+        finally:
+            # Wait for shutdown event with timeout
+            try:
+                await asyncio.wait_for(shutdown_event.wait(), timeout=5.0)
+            except asyncio.TimeoutError:
+                logger.warning("Shutdown timed out")
 
     except Exception as e:
         logger.error(f"Fatal error: {e}")
         traceback.print_exc()
         sys.exit(1)
-
-if __name__ == "__main__":
-    # Use asyncio.run() to properly handle the event loop
-    asyncio.run(main())
 
 if __name__ == "__main__":
     asyncio.run(main())

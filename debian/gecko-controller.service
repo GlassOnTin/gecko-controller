@@ -2,6 +2,7 @@
 Description=Gecko Vivarium Controller
 After=network.target
 
+# In debian/gecko-controller.service
 [Service]
 Type=simple
 User=gecko-controller
@@ -11,9 +12,8 @@ RuntimeDirectory=gecko-controller
 LogsDirectory=gecko-controller
 StateDirectory=gecko-controller
 ConfigurationDirectory=gecko-controller
-ConfigurationDirectoryMode=0750
 Environment=PYTHONPATH=/usr/lib/python3/dist-packages
-ExecStart=/usr/bin/python3 -m gecko_controller.controller
+ExecStart=/opt/gecko-controller/venv/bin/python3 -m gecko_controller.controller
 Restart=on-failure
 RestartSec=10
 

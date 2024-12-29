@@ -6,9 +6,13 @@ After=gecko-controller.service
 Type=simple
 User=gecko-controller
 Group=gpio
-WorkingDirectory=/opt/gecko-controller
+WorkingDirectory=/var/run/gecko-controller
+RuntimeDirectory=gecko-controller
+LogsDirectory=gecko-controller
+StateDirectory=gecko-controller
+ConfigurationDirectory=gecko-controller
 Environment=PYTHONPATH=/usr/lib/python3/dist-packages
-ExecStart=/usr/bin/python3 -m gecko_controller.web.app
+ExecStart=/opt/gecko-controller/venv/bin/python3 -m gecko_controller.web.app
 Restart=on-failure
 RestartSec=10
 
