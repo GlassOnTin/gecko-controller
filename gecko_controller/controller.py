@@ -47,38 +47,95 @@ if config is None:
 
 class GeckoController:
     def __init__(self, test_mode=False):
-        self.config = config
         self.test_mode = test_mode
-        self.display_socket = None
 
-        self.logger = logging.getLogger(__name__)
+        # Basic directory setup needed even in test mode for logging
+        os.makedirs(LOG_DIR, exist_ok=True)
+
+        # Set up logging first thing
+        self.setup_logging()
 
         if not self.test_mode:
+            # Load config after logging is set up so we can log any issues
+            self.config = config
+            if self.config is None:
+                self.logger.error("No configuration found")
+                raise ImportError("No configuration found")
+
+            # Initialize hardware
             self.setup_gpio()
             self.setup_display()
-            self.setup_logging()
-            self.last_log_time = 0
             self.bus = smbus2.SMBus(1)
             self.setup_uv_sensor()
+
+            # Initialize display buffer
             self.image = Image.new('1', (128, 64), 255)
             self.draw = ImageDraw.Draw(self.image)
             self.regular_font = self.load_font("DejaVuSans.ttf", 10)
             self.icon_font = self.load_font("Symbola_hint.ttf", 12)
 
-        self.light_on_time = self.parse_time_setting(self.config.LIGHT_ON_TIME)
-        self.light_off_time = self.parse_time_setting(self.config.LIGHT_OFF_TIME)
-        self.UVA_THRESHOLDS = self.config.UVA_THRESHOLDS
-        self.UVB_THRESHOLDS = self.config.UVB_THRESHOLDS
-        self.uv_correction_factor = self.calculate_uv_correction()
+            # Initialize controller state
+            self.light_on_time = self.parse_time_setting(self.config.LIGHT_ON_TIME)
+            self.light_off_time = self.parse_time_setting(self.config.LIGHT_OFF_TIME)
+            self.UVA_THRESHOLDS = self.config.UVA_THRESHOLDS
+            self.UVB_THRESHOLDS = self.config.UVB_THRESHOLDS
+            self.uv_correction_factor = self.calculate_uv_correction()
 
-        self.ICON_CLOCK = "⏲"
-        self.ICON_HUMIDITY = "🌢"
-        self.ICON_THERMOMETER = "🌡"
-        self.ICON_TARGET = "🞋"
-        self.ICON_GOOD = "☺"
-        self.ICON_TOO_LOW = "🌜"
-        self.ICON_TOO_HIGH = "⚠"
-        self.ICON_ERROR = "?"
+            # Set UI icons
+            self.ICON_CLOCK = "⏲"
+            self.ICON_HUMIDITY = "🌢"
+            self.ICON_THERMOMETER = "🌡"
+            self.ICON_TARGET = "🞋"
+            self.ICON_GOOD = "☺"
+            self.ICON_TOO_LOW = "🌜"
+            self.ICON_TOO_HIGH = "⚠"
+            self.ICON_ERROR = "?"
+
+        self.last_log_time = 0
+        self.display_socket = None
+
+    def setup_logging(self):
+        """Configure logging with rotation and readings log"""
+        # Main logger
+        logger = logging.getLogger('gecko_controller')
+        if not logger.handlers:
+            logger.setLevel(logging.INFO)
+            # Console handler
+            ch = logging.StreamHandler()
+            ch.setFormatter(logging.Formatter(
+                '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+            ))
+            logger.addHandler(ch)
+
+            # File handler
+            log_file = Path(LOG_DIR) / "controller.log"
+            fh = logging.handlers.RotatingFileHandler(
+                log_file,
+                maxBytes=MAX_LOG_SIZE,
+                backupCount=LOG_BACKUP_COUNT
+            )
+            fh.setFormatter(logging.Formatter(
+                '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+            ))
+            logger.addHandler(fh)
+
+        # Readings logger
+        readings_logger = logging.getLogger('gecko_controller.readings')
+        if not readings_logger.handlers:
+            readings_logger.setLevel(logging.INFO)
+            readings_file = Path(LOG_DIR) / LOG_FILE
+            rh = logging.handlers.RotatingFileHandler(
+                readings_file,
+                maxBytes=MAX_LOG_SIZE,
+                backupCount=LOG_BACKUP_COUNT
+            )
+            rh.setFormatter(logging.Formatter(
+                '%(asctime)s,%(temp).1f,%(humidity).1f,%(uva).4f,%(uvb).4f,%(uvc).4f,%(light)d,%(heat)d'
+            ))
+            readings_logger.addHandler(rh)
+
+        self.logger = logger
+        self.readings_logger = readings_logger
 
     def setup_gpio(self):
         """Set up GPIO with proper error handling"""
@@ -260,64 +317,6 @@ class GeckoController:
             # Default to midnight if invalid
             return datetime_time(0, 0)
             
-    def setup_logging(self):
-        """Configure logging with rotation and proper permissions"""
-        try:
-            # Get user/group IDs first
-            uid = pwd.getpwnam("gecko-controller").pw_uid
-            gid = grp.getgrnam("gpio").gr_gid
-
-            # Ensure log directory exists with proper permissions
-            if not os.path.exists(LOG_DIR):
-                os.makedirs(LOG_DIR, mode=0o755)
-                # Set ownership
-                os.chown(LOG_DIR, uid, gid)
-
-            log_file = Path(LOG_DIR + "/" + LOG_FILE)
-
-            # If log file exists, ensure proper permissions
-            if log_file.exists():
-                os.chown(log_file, uid, gid)
-                os.chmod(log_file, 0o644)
-
-            # Rest of the logging setup remains the same...
-            # Configure main logger for system messages
-            self.logger = logging.getLogger("gecko_controller")
-            self.logger.setLevel(logging.INFO)
-
-            # Configure readings logger for sensor data
-            self.readings_logger = logging.getLogger("gecko_controller.readings")
-            self.readings_logger.setLevel(logging.INFO)
-
-            # Create rotating file handler for readings
-            readings_handler = logging.handlers.RotatingFileHandler(
-                log_file,
-                maxBytes=MAX_LOG_SIZE,
-                backupCount=LOG_BACKUP_COUNT,
-                mode='a'  # append mode
-            )
-
-            # Create formatter for readings
-            readings_formatter = logging.Formatter(
-                '%(asctime)s,%(temp).1f,%(humidity).1f,%(uva).4f,%(uvb).4f,%(uvc).4f,%(light)d,%(heat)d'
-            )
-            readings_handler.setFormatter(readings_formatter)
-            self.readings_logger.addHandler(readings_handler)
-
-            # Create console handler for system messages
-            console_handler = logging.StreamHandler()
-            console_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-            console_handler.setFormatter(console_formatter)
-            self.logger.addHandler(console_handler)
-
-            # Ensure all new log files get correct permissions
-            if log_file.exists():
-                os.chown(log_file, uid, gid)
-                os.chmod(log_file, 0o644)
-
-        except Exception as e:
-            print(f"Error setting up logging: {e}")
-            raise
 
     async def setup_socket(self):
         """Initialize display socket server if not already running"""
@@ -647,39 +646,6 @@ class GeckoController:
             return False
         return GPIO.input(self.config.HEAT_RELAY)
 
-    async def cleanup(self):
-        """Cleanup resources before shutdown"""
-        try:
-            self.logger.info("Starting cleanup...")
-
-            # Cancel all running tasks if they exist
-            if hasattr(self, 'tasks'):
-                for task in self.tasks:
-                    if not task.done():
-                        self.logger.info(f"Cancelling task: {task.get_name()}")
-                        task.cancel()
-                        try:
-                            await task
-                        except asyncio.CancelledError:
-                            pass
-
-            # The display singleton will handle its own cleanup
-            self.display = None
-
-            # Stop the socket server if it exists
-            if hasattr(self, 'display_socket') and self.display_socket:
-                self.logger.info("Stopping display socket...")
-                await self.display_socket.stop()
-                self.display_socket = None
-
-            # Cleanup GPIO
-            self.logger.info("Cleaning up GPIO...")
-            GPIO.cleanup()
-
-            self.logger.info("Cleanup completed")
-
-        except Exception as e:
-            self.logger.error(f"Cleanup error: {e}", exc_info=True)
 
     async def run(self):
         """Main run loop with concurrent task handling"""
@@ -809,13 +775,6 @@ class GeckoController:
 async def main():
     """Main entry point with proper signal handling"""
     try:
-        # Set up logging
-        logging.basicConfig(
-            level=logging.INFO,
-            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-        )
-        logger = logging.getLogger('gecko_controller')
-
         # Create controller
         controller = GeckoController()
 
