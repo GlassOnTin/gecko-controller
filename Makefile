@@ -36,7 +36,7 @@ package:
 	$(PYTHON) tools/build.py package
 
 # Development targets
-.PHONY: quick-update quick-restart logs logs-web
+.PHONY: quick-update quick-restart logs logs-web kill-services
 
 # Location of installed package
 INSTALL_DIR := /usr/lib/python3/dist-packages/gecko_controller
@@ -53,6 +53,7 @@ quick-update:
 	@echo "Starting services..."
 	sudo systemctl restart gecko-controller
 	sudo systemctl restart gecko-web
+
 	@echo "Done. Use 'make logs' to watch the logs"
 
 # Just restart the services
@@ -60,11 +61,15 @@ quick-restart:
 	sudo systemctl restart gecko-controller
 	sudo systemctl restart gecko-web
 
+kill-services:
+	sudo kill -9 `ps aux | grep opt/gecko | grep gecko_controller | head -n 1 | awk '{print $$2}'`
+	sudo kill -9 `ps aux | grep opt/gecko | grep gecko_controller | head -n 1 | awk '{print $$2}'`
+
 # Watch the logs
 logs:
-	journalctl -fu gecko-controller
+	journalctl --lines 50 -fu gecko-controller
 logs-web:
-	journalctl -fu gecko-web
+	journalctl --lines 50 -fu gecko-web
 
 # Utility targets
 .PHONY: version-check version-bump

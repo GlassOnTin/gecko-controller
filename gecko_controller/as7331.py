@@ -1,3 +1,4 @@
+import asyncio
 import time
 import smbus
 from adafruit_bus_device.i2c_device import I2CDevice
@@ -781,6 +782,52 @@ class AS7331:
         uvc = uvc_raw*conv_factor_c
         temp = temp_raw_to_celsius(temp_raw)
         return uva, uvb, uvc, temp
+
+    async def async_get_values(self):
+        """Async version of reading values"""
+        try:
+            # Get conversion factors
+            common_factor = self.conversion_factor
+            conv_factor_a = _FSRA*common_factor
+            conv_factor_b = _FSRB*common_factor
+            conv_factor_c = _FSRC*common_factor
+
+            # In continuous mode, don't start measurement - just read values
+            if self.measurement_mode == MEASUREMENT_MODE_CONTINUOUS:
+                # Small delay to ensure we have fresh data
+                await asyncio.sleep(self.measurement_sleep_dt)
+            else:
+                # For command mode, start measurement and wait for ready
+                self.start_measurement()
+                timeout = self.measurement_sleep_dt * 2
+                start_time = time.time()
+
+                while self.notready:
+                    await asyncio.sleep(0.01)
+                    if time.time() - start_time > timeout:
+                        raise TimeoutError("UV sensor measurement timeout")
+
+            # Get raw values
+            div_factor = self.divider_factor
+            uva_raw = self.mres1_as_uint16 * div_factor
+            uvb_raw = self.mres2_as_uint16 * div_factor
+            uvc_raw = self.mres3_as_uint16 * div_factor
+            temp_raw = self.temp_as_uint16
+
+            if self.overflow_exception:
+                if self.status_as_dict['mresof']:
+                    raise AS7331Overflow("measurement register overflow")
+
+            # Convert to uW/cm**2 or deg C
+            uva = uva_raw * conv_factor_a
+            uvb = uvb_raw * conv_factor_b
+            uvc = uvc_raw * conv_factor_c
+            temp = temp_raw_to_celsius(temp_raw)
+
+            return uva, uvb, uvc, temp
+
+        except Exception as e:
+            raise Exception(f"Error reading UV values: {str(e)}") from e
 
 # Exceptions
 # -----------------------------------------------------------------------------

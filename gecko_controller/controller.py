@@ -112,32 +112,42 @@ class GeckoController:
             raise
 
     async def update_display(self, temp, humidity, uva, uvb, uvc, light_status, heat_status):
-        """Update display with fallback to socket-only mode"""
         if not hasattr(self, 'last_display_update'):
             self.last_display_update = 0
 
-        # Rate limit display updates
         current_time = time.time()
         if current_time - self.last_display_update < 0.1:
             return
 
         try:
-            # Always create the display image for the socket interface
+            self.logger.info("Creating display buffer...")
             self.create_display_group(temp, humidity, uva, uvb, uvc, light_status, heat_status)
 
-            # Try physical display
+            # Try physical display with timeout
             if self.display:
-                self.display.show_image(self.image)
+                self.logger.info("Updating physical display...")
+                try:
+                    async with asyncio.timeout(1.0):  # 1 second timeout for I2C operation
+                        await asyncio.get_event_loop().run_in_executor(
+                            None,
+                            lambda: self.display.show_image(self.image)
+                        )
+                        self.logger.info("Physical display updated")
+                except asyncio.TimeoutError:
+                    self.logger.error("Physical display update timed out")
+                    # Don't retry immediately - wait until next cycle
+                    self.display = None  # Clear display reference so we'll reinitialize next time
 
             # Try to update web interface
             if self.display_socket:
+                self.logger.info("Sending to web interface...")
                 await self.display_socket.send_image(self.image)
+                self.logger.info("Web interface updated")
 
             self.last_display_update = current_time
 
         except Exception as e:
-            self.logger.error(f"Display update failed: {e}")
-            # Only retry initialization if significant time has passed
+            self.logger.error(f"Display update failed: {e}", exc_info=True)
             if current_time - self.last_display_update > 5:
                 self.setup_display()
 
@@ -160,7 +170,8 @@ class GeckoController:
                     AS7331,
                     INTEGRATION_TIME_256MS,
                     GAIN_16X,
-                    MEASUREMENT_MODE_CONTINUOUS
+                    MEASUREMENT_MODE_CONTINUOUS,
+                    MEASUREMENT_MODE_COMMAND
                 )
             except ImportError as e:
                 self.logger.error(f"Failed to import AS7331 module: {e}")
@@ -185,7 +196,7 @@ class GeckoController:
                 # Configure sensor
                 self.uv_sensor.integration_time = INTEGRATION_TIME_256MS
                 self.uv_sensor.gain = GAIN_16X
-                self.uv_sensor.measurement_mode = MEASUREMENT_MODE_CONTINUOUS
+                self.uv_sensor.measurement_mode = MEASUREMENT_MODE_COMMAND  #MEASUREMENT_MODE_CONTINUOUS
 
                 # Save configuration
                 self.int_time = INTEGRATION_TIME_256MS
@@ -301,13 +312,15 @@ class GeckoController:
     async def setup_socket(self):
         """Initialize display socket server if not already running"""
         try:
-            # Get the singleton instance
-            self.display_socket = DisplaySocketServer()
-            await self.display_socket.start()
-            self.logger.info("Display socket server initialized and started")
+            if self.display_socket is None:
+                self.display_socket = DisplaySocketServer()
+                await self.display_socket.start()
+                self.logger.info("Display socket server initialized and started")
+            return True
         except Exception as e:
-            self.logger.error(f"Failed to initialize display socket: {e}")
+            self.logger.error(f"Failed to initialize display socket: {e}", exc_info=True)
             self.display_socket = None
+            return False
 
     def get_next_transition(self) -> Tuple[str, datetime]:
         """Calculate time until next light state change"""
@@ -530,12 +543,7 @@ class GeckoController:
             return None, None
 
     async def read_uv(self) -> Tuple[Optional[float], Optional[float], Optional[float]]:
-        """Read UV values from AS7331 sensor and apply geometric correction.
-
-        Returns:
-            Tuple of UVA, UVB, and UVC values in μW/cm², with geometric correction applied.
-            Any value may be None if reading fails.
-        """
+        """Read UV values from AS7331 sensor and apply geometric correction."""
         try:
             if self.uv_sensor is None:
                 self.logger.error("UV sensor not initialized")
@@ -547,8 +555,9 @@ class GeckoController:
 
             for attempt in range(retries):
                 try:
-                    # Get raw values with timeout protection
-                    uva, uvb, uvc, temp = self.uv_sensor.values
+                    # Use async version with timeout
+                    async with asyncio.timeout(5.0):  # 5 second overall timeout
+                        uva, uvb, uvc, temp = await self.uv_sensor.async_get_values()
 
                     # Validate raw readings
                     if any(v is not None and (v < 0 or v > 1000000) for v in (uva, uvb, uvc)):
@@ -569,19 +578,19 @@ class GeckoController:
                             corrected = None
                         corrected_values.append(corrected)
 
-                    self.logger.debug(
-                        f"UV readings - UVA: {corrected_values[0] if corrected_values[0] else 0:.1f} μW/cm², "
-                        f"UVB: {corrected_values[1] if corrected_values[1] else 0:.1f} μW/cm², "
-                        f"UVC: {corrected_values[2] if corrected_values[2] else 0:.1f} μW/cm²"
-                    )
+                    return tuple(corrected_values)
 
-                    return tuple(corrected_values)  # type: ignore
+                except asyncio.TimeoutError:
+                    last_error = "Timeout reading UV sensor"
+                    self.logger.warning(f"UV sensor read attempt {attempt + 1}/{retries} timed out")
+                    await asyncio.sleep(0.5)  # Short delay between retries
+                    continue
 
                 except Exception as e:
-                    last_error = e
+                    last_error = str(e)
                     self.logger.warning(f"UV sensor read attempt {attempt + 1}/{retries} failed: {e}")
                     if attempt < retries - 1:
-                        await asyncio.sleep(0.5)  # Short delay between retries
+                        await asyncio.sleep(0.5)
                     continue
 
             # If we get here, all retries failed
@@ -631,31 +640,53 @@ class GeckoController:
     async def cleanup(self):
         """Cleanup resources before shutdown"""
         try:
+            self.logger.info("Starting cleanup...")
+
+            # Cancel all running tasks if they exist
+            if hasattr(self, 'tasks'):
+                for task in self.tasks:
+                    if not task.done():
+                        self.logger.info(f"Cancelling task: {task.get_name()}")
+                        task.cancel()
+                        try:
+                            await task
+                        except asyncio.CancelledError:
+                            pass
+
             # The display singleton will handle its own cleanup
             self.display = None
 
             # Stop the socket server if it exists
-            if self.display_socket:
+            if hasattr(self, 'display_socket') and self.display_socket:
+                self.logger.info("Stopping display socket...")
                 await self.display_socket.stop()
                 self.display_socket = None
 
+            # Cleanup GPIO
+            self.logger.info("Cleaning up GPIO...")
             GPIO.cleanup()
 
+            self.logger.info("Cleanup completed")
+
         except Exception as e:
-            self.logger.error(f"Cleanup error: {e}")
+            self.logger.error(f"Cleanup error: {e}", exc_info=True)
 
     async def run(self):
         """Main run loop with concurrent task handling"""
         try:
             # Initialize display socket
-            await self.setup_socket()
-            self.logger.info("Starting control and display tasks")
-
-            # Store tasks so we can cancel them during cleanup
-            self.tasks = [
-                asyncio.create_task(self.display_socket.serve_forever(), name='socket_server'),
-                asyncio.create_task(self.control_loop(), name='control_loop')
-            ]
+            socket_initialized = await self.setup_socket()
+            if not socket_initialized:
+                self.logger.warning("Running without display socket")
+                self.tasks = [
+                    asyncio.create_task(self.control_loop(), name='control_loop')
+                ]
+            else:
+                self.logger.info("Starting control and display tasks")
+                self.tasks = [
+                    asyncio.create_task(self.display_socket.serve_forever(), name='socket_server'),
+                    asyncio.create_task(self.control_loop(), name='control_loop')
+                ]
 
             # Run until cancelled
             await asyncio.gather(*self.tasks)
@@ -663,7 +694,7 @@ class GeckoController:
         except asyncio.CancelledError:
             self.logger.info("Received shutdown signal")
         except Exception as e:
-            self.logger.error(f"Fatal error in main loop: {e}")
+            self.logger.error(f"Fatal error in main loop: {e}", exc_info=True)
             raise
         finally:
             await self.cleanup()
@@ -673,42 +704,59 @@ class GeckoController:
         self.logger.info("Starting control loop")
         while True:
             try:
-                self.logger.info("Beginning control loop iteration")  # Add this
-                self.logger.debug("Reading temperature sensor...")
-                temp, humidity = self.read_sensor()
-                if temp is None or humidity is None:
-                    self.logger.error("Failed to read temperature/humidity")
-                else:
-                    self.logger.info(f"Temperature: {temp:.2f}°C, Humidity: {humidity:.2f}%")
+                self.logger.info("=== Starting control loop iteration ===")
+
+                # Temperature/Humidity read
+                try:
+                    self.logger.info("Reading temperature sensor...")
+                    start_time = time.time()
+                    temp, humidity = self.read_sensor()
+                    self.logger.info(f"Temperature read took {time.time() - start_time:.2f}s")
+                    if temp is None or humidity is None:
+                        self.logger.error("Failed to read temperature/humidity")
+                    else:
+                        self.logger.info(f"Temperature: {temp:.2f}°C, Humidity: {humidity:.2f}%")
+                except Exception as e:
+                    self.logger.error(f"Temperature sensor error: {e}")
+                    temp, humidity = None, None
+
+                # UV read
+                try:
+                    self.logger.info("Reading UV sensors...")
+                    start_time = time.time()
+                    uva, uvb, uvc = await self.read_uv()
+                    self.logger.info(f"UV read took {time.time() - start_time:.2f}s")
+                    self.logger.info(f"UV levels - A: {uva}, B: {uvb}, C: {uvc}")
+                except Exception as e:
+                    self.logger.error(f"UV sensor error: {e}", exc_info=True)
+                    uva, uvb, uvc = None, None, None
+
+                # Control state updates
+                try:
+                    self.logger.info("Updating control states...")
+                    light_status = self.control_light()
+                    heat_status = self.control_heat(temp)
+                    self.logger.info(f"Light: {'ON' if light_status else 'OFF'}, Heat: {'ON' if heat_status else 'OFF'}")
+                except Exception as e:
+                    self.logger.error(f"Control state error: {e}", exc_info=True)
+                    light_status = heat_status = False
+
+                # Display update
+                try:
+                    self.logger.info("Updating display...")
+                    start_time = time.time()
+                    await self.update_display(temp, humidity, uva, uvb, uvc,
+                                        light_status, heat_status)
+                    self.logger.info(f"Display update took {time.time() - start_time:.2f}s")
+                except Exception as e:
+                    self.logger.error(f"Display update error: {e}", exc_info=True)
+
+                self.logger.info("=== Control loop iteration complete, waiting 10s ===")
+                await asyncio.sleep(10)
+
             except Exception as e:
-                self.logger.error(f"Error reading temperature sensor: {e}")
-                temp, humidity = None, None
-
-            try:
-                self.logger.debug("Reading UV sensors...")
-                uva, uvb, uvc = await self.read_uv()
-                self.logger.debug(f"UV levels - A: {uva}, B: {uvb}, C: {uvc}")
-            except Exception as e:
-                self.logger.error(f"Error reading UV sensor: {e}")
-                uva, uvb, uvc = None, None, None
-
-            self.logger.debug("Updating control states...")
-            light_status = self.control_light()
-            heat_status = self.control_heat(temp)
-            self.logger.debug(f"Light: {'ON' if light_status else 'OFF'}, Heat: {'ON' if heat_status else 'OFF'}")
-
-            # Always update display, even if sensors fail
-            try:
-                self.logger.debug("Updating display...")
-                await self.update_display(temp, humidity, uva, uvb, uvc,
-                                    light_status, heat_status)
-                self.logger.debug("Display update complete")
-            except Exception as e:
-                self.logger.error(f"Display update failed: {e}")
-                self.logger.exception(e)  # This will log the full traceback
-
-            self.logger.debug("Waiting for next update cycle...")
-            await asyncio.sleep(10)
+                self.logger.error(f"Critical error in control loop: {e}", exc_info=True)
+                await asyncio.sleep(1)  # Brief pause before retry
 
     async def cleanup(self):
         """Cleanup resources before shutdown"""

@@ -1,4 +1,5 @@
 import asyncio
+import threading
 import os
 import json
 import base64
@@ -7,7 +8,6 @@ from io import BytesIO
 from PIL import Image
 from typing import Optional, Tuple, Dict
 from dataclasses import dataclass
-from threading import Lock
 
 @dataclass
 class SocketConfig:
@@ -34,7 +34,8 @@ class ImageSocketBase:
             handler.setFormatter(formatter)
             self.logger.addHandler(handler)
 
-        self._lock = Lock()
+        self._lock = threading.Lock()
+
         # Ensure socket directory exists with proper permissions
         socket_dir = os.path.dirname(self.config.socket_path)
         try:
@@ -62,11 +63,11 @@ class ImageSocketBase:
             raise ValueError(f"Invalid image data: {e}")
 
 class DisplaySocketServer(ImageSocketBase):
-    _instance: Optional['DisplaySocketServer'] = None
-    _lock = Lock()
+    _instance = None
+    _instance_lock = threading.Lock()  # For singleton pattern
 
     def __new__(cls, config: Optional[SocketConfig] = None):
-        with cls._lock:
+        with cls._instance_lock:
             if cls._instance is None:
                 cls._instance = super().__new__(cls)
                 cls._instance._initialized = False
@@ -76,14 +77,18 @@ class DisplaySocketServer(ImageSocketBase):
         if hasattr(self, '_initialized') and self._initialized:
             return
 
-        with self._lock:
-            super().__init__(config)
-            self._cleanup_socket()
-            self.server = None
-            self.current_image = None
-            self._active_connections = set()
-            self._initialized = True
-            self.logger.info(f"Display socket server initialized (id={id(self)})")
+        # Initialize parent class
+        ImageSocketBase.__init__(self, config)
+
+        # Create asyncio lock AFTER parent init
+        self._async_lock = asyncio.Lock()  # Rename to avoid confusion
+
+        self._cleanup_socket()
+        self.server = None
+        self.current_image = None
+        self._active_connections = set()
+        self._initialized = True
+        self.logger.info(f"Display socket server initialized (id={id(self)})")
 
     async def start(self):
         """Start the socket server if not already running"""
@@ -113,12 +118,19 @@ class DisplaySocketServer(ImageSocketBase):
             self.logger.error(f"Socket server error: {e}")
             raise
 
+
     async def send_image(self, image: Image.Image) -> bool:
         """Update the current image with debug logging"""
-        self.logger.debug(f"Updating image on socket server (id={id(self)})")
-        with self._lock:
-            self.current_image = image
-        return True
+        self.logger.info(f"Starting send_image for socket server (id={id(self)})")
+
+        try:
+            async with self._async_lock:  # Use renamed lock
+                self.current_image = image
+                self.logger.info("Image updated in socket server")
+            return True
+        except Exception as e:
+            self.logger.error(f"Error in send_image: {e}", exc_info=True)
+            return False
 
     def _cleanup_socket(self) -> None:
         """Safely clean up the socket file"""
@@ -197,7 +209,7 @@ class DisplaySocketServer(ImageSocketBase):
 
 class DisplaySocketClient(ImageSocketBase):
     _instance: Optional['DisplaySocketClient'] = None
-    _lock = Lock()
+    _lock = threading.Lock()
 
     def __new__(cls, config: Optional[SocketConfig] = None):
         with cls._lock:

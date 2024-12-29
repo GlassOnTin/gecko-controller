@@ -36,27 +36,25 @@ class SSH1106Display:
                 self._initialized = False
 
     def write_cmd(self, cmd: int, retries: int = 3) -> bool:
-        """
-        Write a command byte to the display with error handling and retries.
-
-        Args:
-            cmd: The command byte to send (0-255)
-            retries: Number of retry attempts for transient errors
-
-        Returns:
-            bool: True if successful, False if failed
-        """
         if not self._initialized:
             return False
 
         for attempt in range(retries):
             try:
                 with self._lock:
+                    # Set a lower-level timeout using fcntl
+                    import fcntl
+                    import struct
+                    # I2C timing values (100ms timeout)
+                    I2C_TIMEOUT = 0x0702  # I2C timeout value define
+                    I2C_TIMEOUT_VALUE = struct.pack('I', 100)  # 100 milliseconds
+                    fcntl.ioctl(self.bus.fd, I2C_TIMEOUT, I2C_TIMEOUT_VALUE)
+
                     self.bus.write_byte_data(self.addr, 0x00, cmd)
                     time.sleep(0.001)  # 1ms delay between commands
                     return True
             except Exception as e:
-                if attempt == retries - 1:  # Only print on final attempt
+                if attempt == retries - 1:
                     print(f"Error in write_cmd (attempt {attempt + 1}/{retries}): {e}")
                 time.sleep(0.01)  # Short delay before retry
         return False
