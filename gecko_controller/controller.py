@@ -112,6 +112,7 @@ class GeckoController:
             raise
 
     async def update_display(self, temp, humidity, uva, uvb, uvc, light_status, heat_status):
+        """Update display with proper async handling"""
         if not hasattr(self, 'last_display_update'):
             self.last_display_update = 0
 
@@ -121,24 +122,30 @@ class GeckoController:
 
         try:
             self.logger.info("Creating display buffer...")
-            self.create_display_group(temp, humidity, uva, uvb, uvc, light_status, heat_status)
 
-            # Try physical display with timeout
+            # Run display group creation in executor to avoid blocking
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(
+                None,
+                self.create_display_group,
+                temp, humidity, uva, uvb, uvc, light_status, heat_status
+            )
+
+            # Update physical display with timeout protection
             if self.display:
                 self.logger.info("Updating physical display...")
                 try:
-                    async with asyncio.timeout(1.0):  # 1 second timeout for I2C operation
-                        await asyncio.get_event_loop().run_in_executor(
+                    async with asyncio.timeout(1.0):
+                        await loop.run_in_executor(
                             None,
                             lambda: self.display.show_image(self.image)
                         )
                         self.logger.info("Physical display updated")
                 except asyncio.TimeoutError:
                     self.logger.error("Physical display update timed out")
-                    # Don't retry immediately - wait until next cycle
-                    self.display = None  # Clear display reference so we'll reinitialize next time
+                    self.display = None
 
-            # Try to update web interface
+            # Update web interface
             if self.display_socket:
                 self.logger.info("Sending to web interface...")
                 await self.display_socket.send_image(self.image)
@@ -149,7 +156,10 @@ class GeckoController:
         except Exception as e:
             self.logger.error(f"Display update failed: {e}", exc_info=True)
             if current_time - self.last_display_update > 5:
-                self.setup_display()
+                try:
+                    self.setup_display()
+                except Exception as setup_error:
+                    self.logger.error(f"Display setup retry failed: {setup_error}")
 
     # Font loading helper
     def load_font(self, name: str, size: int) -> ImageFont.FreeTypeFont:
@@ -759,40 +769,45 @@ class GeckoController:
                 await asyncio.sleep(1)  # Brief pause before retry
 
     async def cleanup(self):
-        """Cleanup resources before shutdown"""
+        """Cleanup resources before shutdown with proper task cancellation"""
         try:
             self.logger.info("Starting cleanup...")
 
-            # Cancel all running tasks
-            for task in self.tasks:
-                if not task.done():
-                    self.logger.info(f"Cancelling task: {task.get_name()}")
-                    task.cancel()
+            # Set longer timeout for cleanup operations
+            cleanup_timeout = 10.0  # 10 seconds total timeout
+
+            async with asyncio.timeout(cleanup_timeout):
+                # Cancel all tasks
+                pending = [task for task in self.tasks if not task.done()]
+                if pending:
+                    self.logger.info(f"Cancelling {len(pending)} pending tasks...")
+                    for task in pending:
+                        task.cancel()
+
+                    # Wait for all tasks to complete or be cancelled
+                    await asyncio.gather(*pending, return_exceptions=True)
+
+                # Stop the display socket server if it exists
+                if self.display_socket:
+                    self.logger.info("Stopping display socket...")
                     try:
-                        await task
-                    except asyncio.CancelledError:
-                        pass
+                        await asyncio.wait_for(self.display_socket.stop(), timeout=2.0)
+                    except asyncio.TimeoutError:
+                        self.logger.warning("Display socket stop timed out")
 
-            # The display singleton will handle its own cleanup
-            self.display = None
+                # Cleanup GPIO
+                self.logger.info("Cleaning up GPIO...")
+                GPIO.cleanup()
 
-            # Stop the socket server if it exists
-            if self.display_socket:
-                self.logger.info("Stopping display socket...")
-                await self.display_socket.stop()
-                self.display_socket = None
+            self.logger.info("Cleanup completed successfully")
 
-            # Cleanup GPIO
-            self.logger.info("Cleaning up GPIO...")
-            GPIO.cleanup()
-
-            self.logger.info("Cleanup completed")
-
+        except asyncio.TimeoutError:
+            self.logger.error("Cleanup timed out")
         except Exception as e:
-            self.logger.error(f"Cleanup error: {e}")
-
+            self.logger.error(f"Cleanup error: {e}", exc_info=True)
 
 async def main():
+    """Main entry point with proper signal handling"""
     try:
         # Set up logging
         logging.basicConfig(
@@ -800,54 +815,58 @@ async def main():
             format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
         )
         logger = logging.getLogger('gecko_controller')
-        logger.propagate = False
 
-        # Ensure we're running as the correct user
-        if os.geteuid() == 0:
-            logger.warning("Running as root, checking permissions...")
-            runtime_dir = "/var/run/gecko-controller"
-            log_dir = "/var/log/gecko-controller"
-
-            # Ensure directories exist with correct permissions
-            for directory in [runtime_dir, log_dir]:
-                if not os.path.exists(directory):
-                    os.makedirs(directory, mode=0o755, exist_ok=True)
-                    uid = pwd.getpwnam("gecko-controller").pw_uid
-                    gid = grp.getgrnam("gpio").gr_gid
-                    os.chown(directory, uid, gid)
-
-        # Create and run controller with proper signal handling
+        # Create controller
         controller = GeckoController()
 
-        # Set up signal handlers
+        # Set up signal handling
         loop = asyncio.get_running_loop()
-
-        # Create an event for shutdown coordination
         shutdown_event = asyncio.Event()
 
-        def signal_handler():
-            logger.info("Received shutdown signal")
-            shutdown_event.set()
+        def signal_handler(signame):
+            logger.info(f"Received signal {signame}")
+            # Use call_soon_threadsafe to safely set event from signal handler
+            loop.call_soon_threadsafe(shutdown_event.set)
 
-        for sig in (signal.SIGTERM, signal.SIGINT):
-            loop.add_signal_handler(sig, signal_handler)
+        # Register signal handlers
+        for signame in ('SIGINT', 'SIGTERM'):
+            loop.add_signal_handler(
+                getattr(signal, signame),
+                lambda s=signame: signal_handler(s)
+            )
 
-        # Run the controller until shutdown signal
         try:
-            await controller.run()
-        except asyncio.CancelledError:
-            pass
-        finally:
-            # Wait for shutdown event with timeout
+            # Start controller
+            control_task = asyncio.create_task(controller.run())
+
+            # Wait for shutdown signal
+            await shutdown_event.wait()
+
+            # Cancel control task
+            logger.info("Initiating shutdown...")
+            control_task.cancel()
+
             try:
-                await asyncio.wait_for(shutdown_event.wait(), timeout=5.0)
-            except asyncio.TimeoutError:
-                logger.warning("Shutdown timed out")
+                await control_task
+            except asyncio.CancelledError:
+                pass
+
+            # Run cleanup with timeout
+            logger.info("Running cleanup...")
+            await asyncio.wait_for(controller.cleanup(), timeout=15.0)
+
+        except asyncio.TimeoutError:
+            logger.error("Shutdown timed out")
+        except Exception as e:
+            logger.error(f"Error during shutdown: {e}", exc_info=True)
+            raise
 
     except Exception as e:
-        logger.error(f"Fatal error: {e}")
-        traceback.print_exc()
+        logger.error(f"Fatal error: {e}", exc_info=True)
         sys.exit(1)
+    finally:
+        logger.info("Service stopped")
+        sys.exit(0)
 
 if __name__ == "__main__":
     asyncio.run(main())

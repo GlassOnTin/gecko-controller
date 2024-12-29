@@ -13,7 +13,7 @@ const LiveDisplay = () => {
         }
         const data = await response.json();
 
-        if (data.status === 'success') {
+        if (data.status === 'success' && data.image) {
           setDisplayImage(data.image);
           setError(null);
         } else {

@@ -6,15 +6,17 @@ import re
 import csv
 import sys
 import time
-import shutil
 import stat
-from datetime import datetime, timedelta
-from pathlib import Path
-import importlib.util
-from typing import Dict, Any, Tuple
-from typing import Tuple, Optional
+import base64
+import shutil
 import asyncio
 import logging
+import importlib.util
+from datetime import datetime, timedelta
+from pathlib import Path
+from typing import Dict, Any, Tuple
+from typing import Tuple, Optional
+from io import BytesIO
 
 # Configure logging
 logging.basicConfig(
@@ -854,13 +856,19 @@ async def get_display():
                 'socket_status': status
             }), 503
 
-        success, image_data, error = await client.get_image()
+        success, image, error = await client.get_image()
         logger.debug(f"Got response - success: {success}, error: {error}")
 
-        if success:
+        if success and image:
+            # Convert PIL Image to base64 string
+            buffer = BytesIO()
+            image.save(buffer, format='PNG')
+            buffer.seek(0)
+            image_base64 = base64.b64encode(buffer.getvalue()).decode()
+
             return jsonify({
                 'status': 'success',
-                'image': image_data
+                'image': image_base64
             })
         else:
             error_msg = error or 'Failed to get display image'

@@ -142,18 +142,22 @@ class DisplaySocketServer(ImageSocketBase):
             self.logger.warning(f"Could not remove existing socket: {e}")
 
     async def _handle_client(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
-        """Handle individual client connections"""
+        """Handle individual client connections with proper async handling"""
         client_id = id(writer)
         self.logger.debug(f"New client connection: {client_id}")
         self._active_connections.add(client_id)
 
         try:
-            with self._lock:
+            async with self._async_lock:  # Use async lock
                 self.logger.debug(f"Preparing response for client {client_id}")
-                compressed = await self._compress_image(self.current_image) if self.current_image else None
 
-                if compressed:
-                    self.logger.debug(f"Sending image ({len(compressed)} bytes) to client {client_id}")
+                # Create response
+                response = {}
+                if self.current_image:
+                    # Convert image to bytes in an executor to avoid blocking
+                    loop = asyncio.get_event_loop()
+                    compressed = await loop.run_in_executor(None, self._compress_image, self.current_image)
+
                     response = {
                         'status': 'success',
                         'image': base64.b64encode(compressed).decode(),
@@ -164,16 +168,22 @@ class DisplaySocketServer(ImageSocketBase):
                         }
                     }
                 else:
-                    self.logger.debug(f"No image available for client {client_id}")
                     response = {
                         'status': 'error',
                         'message': 'No image available'
                     }
 
+            # Convert response to bytes
             msg = json.dumps(response).encode()
+
+            # Send length header
             writer.write(len(msg).to_bytes(4, byteorder='big'))
+            await writer.drain()
+
+            # Send message
             writer.write(msg)
             await writer.drain()
+
             self.logger.debug(f"Response sent to client {client_id}")
 
         except Exception as e:
