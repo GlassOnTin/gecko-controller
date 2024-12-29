@@ -36,22 +36,35 @@ package:
 	$(PYTHON) tools/build.py package
 
 # Development targets
-.PHONY: dev install-deps dev-web dev-controller
+.PHONY: quick-update quick-restart logs logs-web
 
-dev: install-deps
-	cd gecko_controller/web/static && npm run dev
+# Location of installed package
+INSTALL_DIR := /usr/lib/python3/dist-packages/gecko_controller
 
-dev-web: activate
-	sudo $(PYTHON_VENV) -m gecko_controller.web.app
+# Quick update - copy changed files and restart services
+quick-update:
+	@echo "Stopping services..."
+	sudo systemctl stop gecko-web gecko-controller
+	@echo "Copying updated files..."
+	sudo cp gecko_controller/display_socket.py $(INSTALL_DIR)/
+	# Add any other files you frequently modify:
+	sudo cp gecko_controller/controller.py $(INSTALL_DIR)/
+	sudo cp gecko_controller/web/app.py $(INSTALL_DIR)/web/
+	@echo "Starting services..."
+	sudo systemctl restart gecko-controller
+	sudo systemctl restart gecko-web
+	@echo "Done. Use 'make logs' to watch the logs"
 
-dev-controller: activate
-	sudo $(PYTHON_VENV) -m gecko_controller.controller
+# Just restart the services
+quick-restart:
+	sudo systemctl restart gecko-controller
+	sudo systemctl restart gecko-web
 
-dev: install-deps
-	cd gecko_controller/web/static && npm run dev
-
-install-deps: $(VENV)/bin/activate
-	cd gecko_controller/web/static && npm install
+# Watch the logs
+logs:
+	journalctl -fu gecko-controller
+logs-web:
+	journalctl -fu gecko-web
 
 # Utility targets
 .PHONY: version-check version-bump

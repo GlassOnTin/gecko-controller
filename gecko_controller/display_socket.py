@@ -13,8 +13,9 @@ from threading import Lock
 class SocketConfig:
     socket_path: str = "/var/run/gecko-controller/display.sock"
     chunk_size: int = 4096
-    timeout: int = 2
-    max_retries: int = 3
+    timeout: int = 10        # Increased to 10 seconds per operation
+    max_retries: int = 10    # Increased to 10 retries
+    retry_delay: float = 1.0 # Added explicit retry delay
     permissions: int = 0o660
     max_size: int = 10 * 1024 * 1024
     compression_quality: int = 85
@@ -22,9 +23,18 @@ class SocketConfig:
 class ImageSocketBase:
     def __init__(self, config: Optional[SocketConfig] = None):
         self.config = config or SocketConfig()
+        # Create logger without adding handlers - let the root logger handle it
         self.logger = logging.getLogger(__name__)
-        self._lock = Lock()
+        # Don't propagate to avoid duplicate logs
+        self.logger.propagate = False
+        # Only add handler if none exist
+        if not self.logger.handlers:
+            handler = logging.StreamHandler()
+            formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+            handler.setFormatter(formatter)
+            self.logger.addHandler(handler)
 
+        self._lock = Lock()
         # Ensure socket directory exists with proper permissions
         socket_dir = os.path.dirname(self.config.socket_path)
         try:
@@ -71,18 +81,9 @@ class DisplaySocketServer(ImageSocketBase):
             self._cleanup_socket()
             self.server = None
             self.current_image = None
-            self._initialized = True
             self._active_connections = set()
-            self.logger.info("Display socket server initialized")
-
-    def _cleanup_socket(self) -> None:
-        """Safely clean up the socket file"""
-        try:
-            if os.path.exists(self.config.socket_path):
-                os.unlink(self.config.socket_path)
-                self.logger.debug(f"Cleaned up existing socket at {self.config.socket_path}")
-        except (PermissionError, OSError) as e:
-            self.logger.warning(f"Could not remove existing socket: {e}")
+            self._initialized = True
+            self.logger.info(f"Display socket server initialized (id={id(self)})")
 
     async def start(self):
         """Start the socket server if not already running"""
@@ -93,23 +94,54 @@ class DisplaySocketServer(ImageSocketBase):
                         self._handle_client,
                         path=self.config.socket_path
                     )
-                    # Make socket accessible to web service user
                     os.chmod(self.config.socket_path, 0o666)
-                    self.logger.info(f"Server listening on {self.config.socket_path}")
+                    self.logger.info(f"Server listening on {self.config.socket_path} (id={id(self)})")
                 except Exception as e:
                     self.logger.error(f"Failed to start server: {e}")
                     raise
 
+    async def serve_forever(self):
+        """Run the socket server forever"""
+        if self.server is None:
+            await self.start()
+
+        self.logger.info("Socket server starting to serve")
+        try:
+            async with self.server:
+                await self.server.serve_forever()
+        except Exception as e:
+            self.logger.error(f"Socket server error: {e}")
+            raise
+
+    async def send_image(self, image: Image.Image) -> bool:
+        """Update the current image with debug logging"""
+        self.logger.debug(f"Updating image on socket server (id={id(self)})")
+        with self._lock:
+            self.current_image = image
+        return True
+
+    def _cleanup_socket(self) -> None:
+        """Safely clean up the socket file"""
+        try:
+            if os.path.exists(self.config.socket_path):
+                os.unlink(self.config.socket_path)
+                self.logger.debug(f"Cleaned up existing socket at {self.config.socket_path}")
+        except (PermissionError, OSError) as e:
+            self.logger.warning(f"Could not remove existing socket: {e}")
+
     async def _handle_client(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
         """Handle individual client connections"""
         client_id = id(writer)
+        self.logger.debug(f"New client connection: {client_id}")
         self._active_connections.add(client_id)
 
         try:
             with self._lock:
+                self.logger.debug(f"Preparing response for client {client_id}")
                 compressed = await self._compress_image(self.current_image) if self.current_image else None
 
                 if compressed:
+                    self.logger.debug(f"Sending image ({len(compressed)} bytes) to client {client_id}")
                     response = {
                         'status': 'success',
                         'image': base64.b64encode(compressed).decode(),
@@ -120,6 +152,7 @@ class DisplaySocketServer(ImageSocketBase):
                         }
                     }
                 else:
+                    self.logger.debug(f"No image available for client {client_id}")
                     response = {
                         'status': 'error',
                         'message': 'No image available'
@@ -129,23 +162,15 @@ class DisplaySocketServer(ImageSocketBase):
             writer.write(len(msg).to_bytes(4, byteorder='big'))
             writer.write(msg)
             await writer.drain()
+            self.logger.debug(f"Response sent to client {client_id}")
 
         except Exception as e:
-            self.logger.error(f"Error sending image: {e}")
+            self.logger.error(f"Error handling client {client_id}: {e}")
         finally:
             writer.close()
             await writer.wait_closed()
             self._active_connections.remove(client_id)
-
-    async def send_image(self, image: Image.Image) -> bool:
-        """Update the current image with thread safety"""
-        try:
-            with self._lock:
-                self.current_image = image
-            return True
-        except Exception as e:
-            self.logger.error(f"Error updating image: {e}")
-            return False
+            self.logger.debug(f"Client {client_id} connection closed")
 
     async def stop(self):
         """Stop the server and clean up resources"""
@@ -193,70 +218,99 @@ class DisplaySocketClient(ImageSocketBase):
 
     async def get_image(self) -> Tuple[bool, Optional[Image.Image], Optional[str]]:
         """Get current display image with retry logic"""
-        for attempt in range(self.config.max_retries):
-            try:
-                # First check if socket exists
-                if not os.path.exists(self.config.socket_path):
-                    self.logger.error(f"Socket not found at {self.config.socket_path}")
-                    return False, None, f"Socket not found at {self.config.socket_path}"
+        last_error = None
 
-                # Check socket permissions
-                try:
-                    socket_stat = os.stat(self.config.socket_path)
-                    self.logger.debug(f"Socket permissions: {oct(socket_stat.st_mode)}")
-                except OSError as e:
-                    self.logger.error(f"Cannot stat socket: {e}")
+        while True:  # Keep trying indefinitely
+            writer = None
+            try:
+                # Only log actual errors, not routine retries
+                if last_error:
+                    self.logger.debug(f"Retrying after error: {last_error}")
+                    last_error = None
 
                 with self._lock:
                     try:
-                        reader, writer = await asyncio.open_unix_connection(
-                            path=self.config.socket_path
-                        )
-                    except ConnectionRefusedError:
-                        self.logger.error("Connection refused - is the display server running?")
-                        await asyncio.sleep(1)  # Wait before retry
-                        continue
-                    except PermissionError:
-                        self.logger.error("Permission denied accessing socket")
-                        return False, None, "Permission denied accessing display socket"
+                        # More generous timeouts
+                        connect_task = asyncio.open_unix_connection(path=self.config.socket_path)
+                        reader, writer = await asyncio.wait_for(connect_task, timeout=self.config.timeout)
 
-                    try:
                         length_bytes = await reader.read(4)
                         if not length_bytes:
-                            self.logger.warning("No data received from socket")
+                            await asyncio.sleep(self.config.retry_delay)
                             continue
 
                         msg_length = int.from_bytes(length_bytes, byteorder='big')
                         data = await reader.read(msg_length)
 
                         response = json.loads(data.decode())
-
                         if response['status'] != 'success':
-                            raise ValueError(response.get('error', 'Unknown error'))
-
-                        if 'image' not in response:
-                            self.logger.warning("No image in response")
-                            return False, None, "No image available"
+                            last_error = response.get('error', 'Unknown error')
+                            await asyncio.sleep(self.config.retry_delay)
+                            continue
 
                         image_data = base64.b64decode(response['image'])
                         self._validate_image(image_data)
 
                         return True, Image.open(BytesIO(image_data)), None
 
-                    except Exception as e:
-                        self.logger.error(f"Error reading from socket: {e}")
-                        raise
-
-                    finally:
-                        writer.close()
-                        await writer.wait_closed()
+                    except (asyncio.TimeoutError, ConnectionRefusedError) as e:
+                        last_error = str(e)
+                        await asyncio.sleep(self.config.retry_delay)
+                        continue
 
             except Exception as e:
-                self.logger.error(f"Attempt {attempt + 1} failed: {str(e)}")
-                await asyncio.sleep(1)  # Wait before retry
+                last_error = str(e)
+                await asyncio.sleep(self.config.retry_delay)
                 continue
 
-        return False, None, "Max retries exceeded"
+            finally:
+                if writer:
+                    try:
+                        writer.close()
+                        await writer.wait_closed()
+                    except Exception as e:
+                        self.logger.debug(f"Error closing writer: {e}")
+
+    async def get_status(self) -> dict:
+        """Get status of display socket connection"""
+        status = {
+            'socket_exists': False,
+            'socket_path': self.config.socket_path,
+            'socket_permissions': None,
+            'socket_owner': None,
+            'errors': []
+        }
+
+        try:
+            # Check if socket exists
+            status['socket_exists'] = os.path.exists(self.config.socket_path)
+
+            # If it exists, get permissions and ownership
+            if status['socket_exists']:
+                try:
+                    stat = os.stat(self.config.socket_path)
+                    status['socket_permissions'] = oct(stat.st_mode)[-3:]  # Last 3 digits of octal permissions
+                    status['socket_owner'] = f"{stat.st_uid}:{stat.st_gid}"
+
+                    # Check if we can read the socket
+                    if not os.access(self.config.socket_path, os.R_OK):
+                        status['errors'].append("No read permission on socket")
+                    if not os.access(self.config.socket_path, os.W_OK):
+                        status['errors'].append("No write permission on socket")
+
+                except Exception as e:
+                    status['errors'].append(f"Error checking socket stats: {str(e)}")
+            else:
+                status['errors'].append("Socket file does not exist")
+
+            # Add runtime user info
+            status['current_user'] = os.getuid()
+            status['current_group'] = os.getgid()
+
+        except Exception as e:
+            status['errors'].append(f"Error getting socket status: {str(e)}")
+
+        return status
 
     def __del__(self):
         """Cleanup any remaining connections"""

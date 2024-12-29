@@ -839,11 +839,19 @@ async def get_display():
         logger.debug("Created DisplaySocketClient")
 
         # Get display socket status first
-        status = await client.get_status()  # We need to add this method
+        status = await client.get_status()
         if not status['socket_exists']:
             return jsonify({
                 'status': 'error',
-                'message': f"Display socket not found. Expected at: {status['socket_path']}"
+                'message': f"Display socket not found. Expected at: {status['socket_path']}",
+                'socket_status': status
+            }), 503
+
+        if status['errors']:
+            return jsonify({
+                'status': 'error',
+                'message': "Display socket has issues",
+                'socket_status': status
             }), 503
 
         success, image_data, error = await client.get_image()
@@ -860,7 +868,7 @@ async def get_display():
             return jsonify({
                 'status': 'error',
                 'message': error_msg,
-                'socket_status': status  # Include socket status in error response
+                'socket_status': status
             }), 500
 
     except Exception as e:

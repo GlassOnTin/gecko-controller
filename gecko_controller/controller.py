@@ -2,6 +2,7 @@
 import asyncio
 import os
 import sys
+import signal
 import time
 import math
 import pwd
@@ -518,36 +519,67 @@ class GeckoController:
             self.logger.error(f"Cleanup error: {e}")
 
     async def run(self):
+        """Main run loop with concurrent task handling"""
         try:
+            # Initialize display socket
             await self.setup_socket()
-            await self.update_display(None, None, None, None, None, False, False)
+            self.logger.info("Starting control and display tasks")
 
-            while True:
-                try:
-                    temp, humidity = self.read_sensor()
-                except Exception as e:
-                    self.logger.error(f"Error reading temperature sensor: {e}")
-                    temp, humidity = None, None
+            # Create both tasks
+            tasks = [
+                asyncio.create_task(self.display_socket.serve_forever(), name='socket_server'),
+                asyncio.create_task(self.control_loop(), name='control_loop')
+            ]
 
-                try:
-                    uva, uvb, uvc = await self.read_uv()
-                except Exception as e:
-                    self.logger.error(f"Error reading UV sensor: {e}")
-                    uva, uvb, uvc = None, None, None
+            # Run both tasks concurrently
+            await asyncio.gather(*tasks)
 
-                light_status = self.control_light()
-                heat_status = self.control_heat(temp)
+        except asyncio.CancelledError:
+            self.logger.info("Received shutdown signal")
+        except Exception as e:
+            self.logger.error(f"Fatal error in main loop: {e}")
+            raise
+        finally:
+            await self.cleanup()
 
-                # Always update display, even if sensors fail
+    async def control_loop(self):
+        """Separated control loop for clarity"""
+        self.logger.info("Starting control loop")
+        while True:
+            try:
+                self.logger.debug("Reading temperature sensor...")
+                temp, humidity = self.read_sensor()
+                self.logger.debug(f"Temperature: {temp}°C, Humidity: {humidity}%")
+            except Exception as e:
+                self.logger.error(f"Error reading temperature sensor: {e}")
+                temp, humidity = None, None
+
+            try:
+                self.logger.debug("Reading UV sensors...")
+                uva, uvb, uvc = await self.read_uv()
+                self.logger.debug(f"UV levels - A: {uva}, B: {uvb}, C: {uvc}")
+            except Exception as e:
+                self.logger.error(f"Error reading UV sensor: {e}")
+                uva, uvb, uvc = None, None, None
+
+            self.logger.debug("Updating control states...")
+            light_status = self.control_light()
+            heat_status = self.control_heat(temp)
+            self.logger.debug(f"Light: {'ON' if light_status else 'OFF'}, Heat: {'ON' if heat_status else 'OFF'}")
+
+            # Always update display, even if sensors fail
+            try:
+                self.logger.debug("Updating display...")
                 await self.update_display(temp, humidity, uva, uvb, uvc,
-                                        light_status, heat_status)
-
-                # Log readings if we have any valid data
-                if any(x is not None for x in [temp, humidity, uva, uvb, uvc]):
-                    self.log_readings(temp, humidity, uva, uvb, uvc,
                                     light_status, heat_status)
+                self.logger.debug("Display update complete")
+            except Exception as e:
+                self.logger.error(f"Display update failed: {e}")
+                self.logger.exception(e)  # This will log the full traceback
 
-                await asyncio.sleep(10)
+            self.logger.debug("Waiting for next update cycle...")
+            await asyncio.sleep(10)
+
 async def main():
     try:
         # Set up logging
@@ -556,6 +588,7 @@ async def main():
             format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
         )
         logger = logging.getLogger('gecko_controller')
+        logger.propagate = False
 
         # Ensure we're running as the correct user
         if os.geteuid() == 0:
@@ -571,13 +604,25 @@ async def main():
                     gid = grp.getgrnam("gpio").gr_gid
                     os.chown(directory, uid, gid)
 
+        # Create and run controller with proper signal handling
         controller = GeckoController()
+
+        # Set up signal handlers
+        loop = asyncio.get_running_loop()
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            loop.add_signal_handler(sig, lambda: asyncio.create_task(controller.cleanup()))
+
+        # Run the controller
         await controller.run()
 
     except Exception as e:
         logger.error(f"Fatal error: {e}")
         traceback.print_exc()
         sys.exit(1)
+
+if __name__ == "__main__":
+    # Use asyncio.run() to properly handle the event loop
+    asyncio.run(main())
 
 if __name__ == "__main__":
     asyncio.run(main())
