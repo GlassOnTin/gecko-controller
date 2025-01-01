@@ -183,4 +183,4 @@ debhelper-build-stamp
 *.log
 *.substvars
 /.vagrant
-/*/debian/files
+/*/debian/files.pybuild/
