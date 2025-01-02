@@ -1,0 +1,3140 @@
+
+//gecko_controller/__init__.py
+"""Gecko Controller Package."""
+
+__version__ = "0.1.0"
+
+//gecko_controller/as7331.py
+import time
+import smbus
+from adafruit_bus_device.i2c_device import I2CDevice
+
+DEFAULT_I2C_ADDR = 0x74
+
+# Control/Configuration register bank
+_REG_ADDR_OSR    = 0x00 # Operational State Register
+_REG_ADDR_AGEN   = 0x02 # API Generation Register
+_REG_ADDR_CREG1  = 0x06 # Configuration Register 1
+_REG_ADDR_CREG2  = 0x07 # Configuration Register 2
+_REG_ADDR_CREG3  = 0x08 # Configuration Register 3
+_REG_ADDR_BREAK  = 0x09 # Break Register
+_REG_ADDR_EDGES  = 0x0A # Edges Register (for SYND mode)
+_REG_ADDR_OPTREG = 0x0B # Option Register
+
+# Output register bank (Measurement State)
+_REG_ADDR_STATUS   = 0x00 # Status register
+_REG_ADDR_TEMP     = 0x01 # Temperature measurement result
+_REG_ADDR_MRES1    = 0x02 # Channel A measurement result
+_REG_ADDR_MRES2    = 0x03 # Channel B measurement result
+_REG_ADDR_MRES3    = 0x04 # Channel C measurement result
+_REG_ADDR_OUTCONVL = 0x05 # Result of time conversion (lsb)
+_REG_ADDR_OUTCONVH = 0x06 # Result of time conversion (msb)
+
+# OSR REG Masks (RW)
+_OSR_MASK_DOS      = 0x07 # Device Operating State
+_OSR_MASK_SW_RES   = 0x08 # Software Reset
+_OSR_MASK_PD       = 0x40 # Power Down State Switch
+_OSR_MASK_SS       = 0x80 # Start/Stop measurement
+
+# CREG1 Masks (RW)
+_CREG1_MASK_INTEGRATION_TIME = 0x0f # Integration time
+_CREG1_MASK_GAIN             = 0xf0 # Irradiance reponsivity
+
+# CREG2 Masks (RW)
+_CREG2_MASK_EN_TM  = 0x40 # Disable/enable measurement of integration time
+_CREG2_MASK_EN_DIV = 0x08 # Disable/enable divider of measurement results
+_CREG2_MASK_DIV    = 0x07 # Digital divider of measurement results
+
+# CREG2 Masks (RW)
+_CREG3_MASK_MMODE = 0xc0 # Measurement mode
+_CREG3_MASK_SB    = 0x10 # Standby disable/enable
+_CREG3_MASK_RDYOD = 0x08 # Pin Ready push-pull or open-drain
+_CREG3_MASK_CCLK  = 0x03 # Internal clock frequency
+
+# Status REG Masks (RO)
+_STATUS_MASK_POWERSTATE   = 0x01 # Power state
+_STATUS_MASK_STANDBYSTATE = 0x02 # Standby state
+_STATUS_MASK_NOTREADY     = 0x04 # Not ready state
+_STATUS_MASK_NDATA        = 0x08 # New measurements transferred
+_STATUS_MASK_LDATA        = 0x10 # Measurements overwritten
+_STATUS_MASK_ADCOF        = 0x20 # Overflow of internal conversion channel
+_STATUS_MASK_MRESOF       = 0x40 # Overflow of measurement result
+_STATUS_MASK_OUTCONVOF    = 0x80 # Overflow of time reference
+
+# AGEN Register Masks
+_AGEN_MASK_DEVID  = 0xf0 # Device Id number
+_AGEN_MASK_MUT    = 0x0f # Mutation number of control bank
+_AGEN_SHIFT_DEVID = 0x4  # Shift value for dev id
+
+# Device modes
+DEVICE_STATE_CONFIGURATION = 0x2
+DEVICE_STATE_MEASUREMENT   = 0x3
+ALLOWED_DEVICE_STATES = (
+        DEVICE_STATE_CONFIGURATION,
+        DEVICE_STATE_MEASUREMENT,
+        )
+
+# Mode to/from string conversions
+DEVICE_STATE_TO_STRING = {
+        DEVICE_STATE_CONFIGURATION : 'configuration',
+        DEVICE_STATE_MEASUREMENT   : 'measurement',
+        }
+DEVICE_STATE_FROM_STRING = {v:k for k,v in DEVICE_STATE_TO_STRING.items()}
+
+# Integration times (bits 3:0 of CREG1)
+INTEGRATION_TIME_1MS     = 0x00
+INTEGRATION_TIME_2MS     = 0x01
+INTEGRATION_TIME_4MS     = 0x02
+INTEGRATION_TIME_8MS     = 0x03
+INTEGRATION_TIME_16MS    = 0x04
+INTEGRATION_TIME_32MS    = 0x05
+INTEGRATION_TIME_64MS    = 0x06
+INTEGRATION_TIME_128MS   = 0x07
+INTEGRATION_TIME_256MS   = 0x08
+INTEGRATION_TIME_512MS   = 0x09
+INTEGRATION_TIME_1024MS  = 0x0a
+INTEGRATION_TIME_2048MS  = 0x0b
+INTEGRATION_TIME_4096MS  = 0x0c
+INTEGRATION_TIME_8192MS  = 0x0d
+INTEGRATION_TIME_16384MS = 0x0e
+
+_INTEGRATION_TIME_MIN_VAL = INTEGRATION_TIME_1MS
+_INTEGRATION_TIME_MAX_VAL = INTEGRATION_TIME_16384MS
+
+# Gain settings (bits 7:4 CREG1)
+GAIN_2048X = 0x00
+GAIN_1024X = 0x01
+GAIN_512X  = 0x02
+GAIN_256X  = 0x03
+GAIN_128X  = 0x04
+GAIN_64X   = 0x05
+GAIN_32X   = 0x06
+GAIN_16X   = 0x07
+GAIN_8X    = 0x08
+GAIN_4X    = 0x09
+GAIN_2X    = 0x0a
+GAIN_1X    = 0x0b
+
+_GAIN_MIN_VAL = 0x00
+_GAIN_MAX_VAL = 0x0b
+_GAIN_BIT_SHIFT = 4
+
+# Measurement mode settings (bits 7:6 of CREG3)
+MEASUREMENT_MODE_CONTINUOUS         = 0x00
+MEASUREMENT_MODE_COMMAND            = 0x40
+MEASUREMENT_MODE_SYNC_START         = 0x80
+MEASUREMENT_MODE_SYNC_START_AND_END = 0xc0
+
+ALLOWED_MEASUREMENT_MODES = (
+        MEASUREMENT_MODE_CONTINUOUS,
+        MEASUREMENT_MODE_COMMAND,
+        MEASUREMENT_MODE_SYNC_START,
+        MEASUREMENT_MODE_SYNC_START_AND_END,
+        )
+
+MEASUREMENT_MODE_TO_STRING = {
+        MEASUREMENT_MODE_CONTINUOUS          : 'continuous',
+        MEASUREMENT_MODE_COMMAND             : 'command',
+        MEASUREMENT_MODE_SYNC_START          : 'sync_start',
+        MEASUREMENT_MODE_SYNC_START_AND_END  : 'sync_start_and_end',
+        }
+
+STRING_TO_MEASUREMENT_MODE = {v:k for k,v in MEASUREMENT_MODE_TO_STRING.items()}
+
+# Internal clock frequencys
+CCLK_FREQ_1024KHZ = 0x00
+CCLK_FREQ_2048KHZ = 0x01
+CCLK_FREQ_4096KHZ = 0x02
+CCLK_FREQ_8192KHZ = 0x03
+
+_CCLK_MIN_VAL = CCLK_FREQ_1024KHZ
+_CCKL_MAX_VAL = CCLK_FREQ_8192KHZ
+
+# Measurement divider min/max value
+_DIV_MIN_VAL = 0x00
+_DIV_MAX_VAL = 0x07
+
+# Fullscale range values for UV A,B and C channels
+_FSRA = 348160
+_FSRB = 387072
+_FSRC = 169984
+
+class AS7331:
+    """
+    AS7331 Spectral UV sensor. Implements I2C interface with the AS7331
+    sensor for Linux systems using smbus2.
+    """
+
+    def __init__(self, bus_number, address=DEFAULT_I2C_ADDR):
+        """
+        Initialize the AS7331 sensor.
+
+        Args:
+            bus_number (int): I2C bus number (e.g., 1 for /dev/i2c-1)
+            address (int): I2C device address (default: 0x74)
+        """
+        self.bus = smbus.SMBus(bus_number)
+        self.address = address
+
+        # Keep local copies of gain, integration_time, etc for conversion
+        # calculations that way we don't have to request these each time we want
+        # to convert a measurement.
+        self.software_reset()
+        self.state_copy = {
+            'gain': self.gain,
+            'integration_time': self.integration_time,
+            'divider': self.divider,
+            'divider_enabled': self.divider_enabled,
+            'measurement_mode': self.measurement_mode,
+            'cclk': self.cclk,
+        }
+        self.set_default_config()
+        self.overflow_exception = False
+
+    def set_default_config(self):
+        """
+        Set the device configuration to default values
+        """
+        self.measurement_mode = MEASUREMENT_MODE_COMMAND
+        self.integration_time = INTEGRATION_TIME_256MS
+        self.gain = GAIN_16X
+        self.standby_state = False
+        self.power_down_enable = False
+        self.divider_enabled = False
+
+        # TO DO
+        # ------------------------------------------------------------------
+        # Not complete, need to set a few more things such as divider, etc.
+        # ------------------------------------------------------------------
+
+        self.device_state = DEVICE_STATE_MEASUREMENT
+
+    def read_uint16(self, reg):
+        """Reads two bytes (uint16) from the specified register"""
+        try:
+            data = self.bus.read_i2c_block_data(self.address, reg, 2)
+            return data[0], data[1]  # lo_byte, hi_byte
+        except OSError as e:
+            print(f"I2C read error: {e}")
+            return 0, 0
+
+    def write_uint16(self, reg, lo_byte, hi_byte):
+        """Writes two bytes (uint16) to the specified register"""
+        try:
+            self.bus.write_i2c_block_data(self.address, reg, [lo_byte, hi_byte])
+        except OSError as e:
+            print(f"I2C write error: {e}")
+
+    def read_uint8(self, reg):
+        """Reads one byte (uint8) from the specified register"""
+        try:
+            return self.bus.read_byte_data(self.address, reg)
+        except OSError as e:
+            print(f"I2C read error: {e}")
+            return 0
+
+    def write_uint8(self, reg, val):
+        """Writes one byte (uint8) to the specified register"""
+        try:
+            self.bus.write_byte_data(self.address, reg, val)
+        except OSError as e:
+            print(f"I2C write error: {e}")
+
+    def __del__(self):
+        """Clean up by closing the SMBus"""
+        try:
+            self.bus.close()
+        except:
+            pass
+
+    @property
+    def osr(self):
+        """ Reads the contents of the Operational State Register (OSR) """
+        return self.read_uint8(_REG_ADDR_OSR)
+
+    @osr.setter
+    def osr(self, val):
+        """ Writes to the Operational State Register (OSR) """
+        self.write_uint8(_REG_ADDR_OSR, val)
+
+    @property
+    def osr_and_status(self):
+        """ Reads both the Operational State Register (OSR) and Status Register. """
+        byte0, byte1 = self.read_uint16(_REG_ADDR_STATUS)
+        return byte0, byte1
+
+    @property
+    def status(self):
+        """ Reads the Status Register """
+        byte0, byte1 = self.read_uint16(_REG_ADDR_STATUS)
+        return byte1
+    @property
+    def status_as_dict(self):
+        """ Returns the contents of the status register as a dictionary """
+        status_byte = self.status
+        status_dict = {
+                'powerstate'   : bool(_STATUS_MASK_POWERSTATE   & status_byte),
+                'standbystate' : bool(_STATUS_MASK_STANDBYSTATE & status_byte),
+                'notready'     : bool(_STATUS_MASK_NOTREADY     & status_byte),
+                'ndata'        : bool(_STATUS_MASK_NDATA        & status_byte),
+                'ldata'        : bool(_STATUS_MASK_LDATA        & status_byte),
+                'adcof'        : bool(_STATUS_MASK_ADCOF        & status_byte),
+                'mresof'       : bool(_STATUS_MASK_MRESOF       & status_byte),
+                'outconvof'    : bool(_STATUS_MASK_OUTCONVOF    & status_byte),
+                }
+        return status_dict
+
+    @property
+    def notready(self):
+        status_byte = self.status
+        return bool(_STATUS_MASK_NOTREADY & status_byte)
+
+    @property
+    def creg1(self):
+        """ Reads the contents of the CREG1 configuration register """
+        return self.read_uint8(_REG_ADDR_CREG1)
+
+    @creg1.setter
+    def creg1(self, val):
+        """ Writes to the CREG1 configuration register """
+        self.write_uint8(_REG_ADDR_CREG1, val)
+
+    @property
+    def creg2(self):
+        """ Reads the contents of the CREG2 configuration register """
+        return self.read_uint8(_REG_ADDR_CREG2)
+
+    @creg2.setter
+    def creg2(self, val):
+        """ Writes to the CREG2 configuration register """
+        self.write_uint8(_REG_ADDR_CREG2, val)
+
+    @property
+    def creg3(self):
+        """ Reads the contents of the CREG3 configuration register """
+        return self.read_uint8(_REG_ADDR_CREG3)
+
+    @creg3.setter
+    def creg3(self, val):
+        """ Writes to the CREG3 configuratino register """
+        self.write_uint8(_REG_ADDR_CREG3, val)
+
+    @property
+    def temp(self):
+        """
+        Reads the TEMP register containing the temperature measurement.
+        The result is returned as raw bytes.
+        """
+        lo_byte, hi_byte = self.read_uint16(_REG_ADDR_TEMP)
+        return lo_byte, hi_byte
+
+    @property
+    def temp_as_uint16(self):
+        return bytes_to_uint16(*self.temp)
+
+    @property
+    def mres1(self):
+        """
+        Reads the MRES1 regisister containing the measurement result of the
+        UVA channel. The result is returned as raw bytes.
+        """
+        lo_byte, hi_byte = self.read_uint16(_REG_ADDR_MRES1)
+        return lo_byte, hi_byte
+
+    @property
+    def mres1_as_uint16(self):
+        return bytes_to_uint16(*self.mres1)
+
+    @property
+    def mres2(self):
+        """
+        Reads the MRES2 register containing the measurement result of the
+        UVB channel. The results is returned as raw bytes.
+        """
+        lo_byte, hi_byte = self.read_uint16(_REG_ADDR_MRES2)
+        return lo_byte, hi_byte
+
+    @property
+    def mres2_as_uint16(self):
+        return bytes_to_uint16(*self.mres2)
+
+    @property
+    def mres3(self):
+        """
+        Reads the MRES1 regisister containing the measurement result of the
+        UVC channel. The result is returned as raw bytes.
+        """
+        lo_byte, hi_byte = self.read_uint16(_REG_ADDR_MRES3)
+        return lo_byte, hi_byte
+
+    @property
+    def mres3_as_uint16(self):
+        return bytes_to_uint16(*self.mres3)
+
+    @property
+    def power_down_enabled(self):
+        """ Reads the power down state of the device True/False via the OSR """
+        with ConfigurationStateManager(self):
+            val = bool(self.osr & _OSR_MASK_PD)
+        return val
+
+    @power_down_enabled.setter
+    def power_down_enabled(self,val):
+        """ Sets the power down state of the device True/False via the OSR """
+        with ConfigurationStateManager(self):
+            if val:
+                self.osr = self.osr | _OSR_MASK_PD
+            else:
+                self.osr = self.osr & ~_OSR_MASK_PD
+
+    def software_reset(self):
+        self.osr = self.osr | _OSR_MASK_SW_RES
+
+    @property
+    def device_state(self):
+        """
+        Reads the current device state from the Operational State Register (OSR).
+
+        Returns either DEVICE_STATE_CONFIGURATION or DEVICE_STATE_MEASUREMENT.
+        """
+        return self.osr & _OSR_MASK_DOS
+
+    @device_state.setter
+    def device_state(self, new_mode):
+        """
+        Sets the current device state in the Operational State Register (OSR)
+
+        Can be set to either DEVICE_STATE_CONFIGURATION or DEVICE_STATE_MEASUREMENT.
+        """
+        if not new_mode in ALLOWED_DEVICE_STATES:
+            raise ValueError(f'unknown mode {new_mode}')
+        self.osr = (self.osr & ~_OSR_MASK_DOS) | new_mode
+
+    @property
+    def device_state_as_string(self):
+        """
+        Gets the device state from the Operatinoal State Register (OSR) as a string.
+
+        Returns either 'measurement' or 'configuration'.
+
+        """
+        return DEVICE_STATE_TO_STRING.get(self.device_state, 'unknown')
+
+    def device_state_from_string(self, mode_string):
+        """
+        Sets the device state in the Operation State Register from a string input.
+
+        Can be set to either 'measurement' or 'configuration'.
+        """
+        try:
+            mode = DEVICE_STATE_FROM_STRING[mode_string]
+        except KeyError:
+            pass
+        else:
+            self.device_state = mode
+
+    def start_measurement(self):
+        """ Starts a one-shot measurement.  Used for measuremnts in command mode. """
+        self.osr = self.osr | _OSR_MASK_SS
+
+    @property
+    def gain(self):
+        """
+        Gets the current gain setting from the CREG1 configuration register.
+
+        Returns one of the following values: GAIN_2048X, GAIN_1024X, GAIN_512X,
+        GAIN_256X, GAIN_128X, GAIN_64X, GAIN_32X, GAIN_16X, GAIN_8X, GAIN_4X,
+        GAIN_2X, GAIN_1X.
+        """
+        with ConfigurationStateManager(self):
+            val = (self.creg1 & _CREG1_MASK_GAIN) >> _GAIN_BIT_SHIFT
+        return val
+
+    @property
+    def gain_value(self):
+        """
+        Returns gain as a numeric value
+        """
+        return gain_to_value(self.gain)
+
+    @property
+    def gain_as_string(self):
+        """
+        Gets the current gain values from the CREG1 configuration register as a
+        string.
+
+        Returns one of the following values: '2048x', '1024x', '512x', '256x',
+        '128x', '64x', '32x', '16x', '8x ', '4x', '2x', '1x'
+        """
+        return f'{self.gain_value}x'
+
+    @gain.setter
+    def gain(self, new_gain):
+        """
+        Sets the current gains value in the CREG1 configuration register.
+
+        Can be set to one of the following values: '2048x', '1024x', '512x',
+        '256x', '128x', '64x', '32x', '16x', '8x ', '4x', '2x', '1x'
+        """
+
+        with ConfigurationStateManager(self):
+            if new_gain < _GAIN_MIN_VAL or new_gain > _GAIN_MAX_VAL:
+                raise ValueError(f'unknown gain {new_gain}')
+            self.creg1 = (self.creg1 & ~_CREG1_MASK_GAIN) | (new_gain << _GAIN_BIT_SHIFT)
+            self.state_copy['gain'] = new_gain
+
+    @property
+    def integration_time(self):
+        """
+        Gets the current integration time setting from the CREG1 configuration
+        register.
+
+        Returns one of the following values:
+            INTEGRATION_TIME_1MS,
+            INTEGRATION_TIME_2MS,
+            INTEGRATION_TIME_4MS,
+            INTEGRATION_TIME_8MS,
+            INTEGRATION_TIME_16MS,
+            INTEGRATION_TIME_32MS,
+            INTEGRATION_TIME_64MS,
+            INTEGRATION_TIME_128MS,
+            INTEGRATION_TIME_256MS,
+            INTEGRATION_TIME_512MS,
+            INTEGRATION_TIME_1024MS,
+            INTEGRATION_TIME_2048MS,
+            INTEGRATION_TIME_4096MS,
+            INTEGRATION_TIME_8192MS,
+            INTEGRATION_TIME_16384MS,
+        """
+        with ConfigurationStateManager(self):
+            val = self.creg1 & _CREG1_MASK_INTEGRATION_TIME
+        return val
+
+    @property
+    def integration_time_value(self):
+        """
+        Gets the integration time as a numerical value (ms).
+        """
+        return integration_time_to_value(self.integration_time)
+
+    @property
+    def integration_time_as_string(self):
+        """
+        Gets the current integration time setting from the CREG1 configuration
+        register as a string.
+
+        Returns one of the following values: '1ms', '2ms', '4ms', '8ms',
+        '16ms', '32ms', '64ms', '128ms', '256ms', '512ms', '1024ms', '2048ms',
+        '4096ms', '8192ms', '16384ms',
+        """
+        return f'{self.integration_time_value}ms'
+
+    @integration_time.setter
+    def integration_time(self, new_time):
+        """
+        Sets the integration time  via the CREG1 configuration register.
+
+        Can be set to one of the following values.
+            INTEGRATION_TIME_1MS,
+            INTEGRATION_TIME_2MS,
+            INTEGRATION_TIME_4MS,
+            INTEGRATION_TIME_8MS,
+            INTEGRATION_TIME_16MS,
+            INTEGRATION_TIME_32MS,
+            INTEGRATION_TIME_64MS,
+            INTEGRATION_TIME_128MS,
+            INTEGRATION_TIME_256MS,
+            INTEGRATION_TIME_512MS,
+            INTEGRATION_TIME_1024MS,
+            INTEGRATION_TIME_2048MS,
+            INTEGRATION_TIME_4096MS,
+            INTEGRATION_TIME_8192MS,
+            INTEGRATION_TIME_16384MS,
+        """
+        with ConfigurationStateManager(self):
+            if new_time < _INTEGRATION_TIME_MIN_VAL or new_time > _INTEGRATION_TIME_MAX_VAL:
+                raise ValueError(f'unknown integration time {new_time}')
+            self.creg1 = (self.creg1 & ~_CREG1_MASK_INTEGRATION_TIME) | new_time
+            self.state_copy['integration_time'] = new_time
+
+    @property
+    def time_measurement_enabled(self):
+        """
+        Reads CREG2 and returns the time measurement enabled setting (True/False)
+        """
+        with ConfigurationStateManager(self):
+            val = bool(self.creg2 & _CREG2_MASK_TM_EN)
+        return val
+
+    @time_measurement_enabled.setter
+    def time_measurement_enabled(self, val):
+        """ Enables/disables the conversion time measurement """
+        with ConfigurationStateManager(self):
+            if val:
+                self.creg2 = self.creg2 | _CREG2_MASK_TM_ENV
+            else:
+                self.creg2 = self.creg2 & ~_CREG2_MASK_TM_EN
+
+    @property
+    def divider_enabled(self):
+        """
+        Reads CREG2 and return measurement divider enabled setting (True/False)
+        """
+        with ConfigurationStateManager(self):
+            val = bool(self.creg2 & _CREG2_MASK_EN_DIV)
+        return val
+
+    @divider_enabled.setter
+    def divider_enabled(self, val):
+        """ Enables/disables the measurement divider """
+        with ConfigurationStateManager(self):
+            if val:
+                self.creg2 = self.creg2 | _CREG2_MASK_EN_DIV
+            else:
+                self.creg2 = self.creg2 & ~_CREG2_MASK_EN_DIV
+            self.state_copy['divider_enabled'] = self.divider_enabled
+
+    @property
+    def divider(self):
+        """ Reads CREG2 and returns the measurement divider """
+        with ConfigurationStateManager(self):
+            val = self.creg2 & _CREG2_MASK_DIV
+        return val
+
+    @divider.setter
+    def divider(self, new_div):
+        """ Sets the measurement divider via CREG2 """
+        with ConfigurationStateManager(self):
+            if (new_div < _DIV_MIN_VAL) or (new_div > _DIV_MAX_VAL):
+                raise ValueError(f'new_div out of range')
+            self.creg2 = (self.creg2 & ~_CREG2_MASK_DIV) | new_div
+            self.state_copy['divider'] = self.divider
+
+    @property
+    def measurement_mode(self):
+        """
+        Gets the current measurement mode from the CREG3 configuration register.
+
+        Returns one of the following:
+            MEASUREMENT_MODE_CONTINUOUS,
+            MEASUREMENT_MODE_COMMAND,
+            MEASUREMENT_MODE_SYNC_START,
+            MEASUREMENT_MODE_SYNC_START_AND_END,
+        """
+        with ConfigurationStateManager(self):
+            val = self.creg3 & _CREG3_MASK_MMODE
+        return val
+
+    @measurement_mode.setter
+    def measurement_mode(self, new_mmode):
+        """
+        Sets the current measurement mode via the CREG3 configuration register.
+
+        Can be set to one of the following:
+            MEASUREMENT_MODE_CONTINUOUS,
+            MEASUREMENT_MODE_COMMAND,
+            MEASUREMENT_MODE_SYNC_START,
+            MEASUREMENT_MODE_SYNC_START_AND_END,
+        """
+        with ConfigurationStateManager(self):
+            if not new_mmode in ALLOWED_MEASUREMENT_MODES:
+                raise ValueError(f'unknown measurement mode: {new_mmode}')
+            self.creg3 = (self.creg3 & ~_CREG3_MASK_MMODE) | new_mmode
+            self.state_copy['measurement_mode'] = new_mmode
+
+    @property
+    def measurement_mode_as_string(self):
+        """
+        Returns the current measurement mode from the CREG3 configuration register.
+
+        Returns one of the following values.
+            'continuous',
+            'command',
+            'sync_start',
+            'sync_start_and_end',
+        """
+        return MEASUREMENT_MODE_TO_STRING.get(self.measurement_mode, 'unknown')
+
+    @property
+    def standby_state(self):
+        """
+        Gets the standby state value from the CREG3 configuration register.
+
+        Returns True or False
+        """
+        with ConfigurationStateManager(self):
+            val = bool(self.creg3 & _CREG3_MASK_SB)
+        return val
+
+
+    @standby_state.setter
+    def standby_state(self, val):
+        """
+        Sets the standby state value in the CREG3 configuration register.
+
+        Can be set to either True or False
+        """
+        with ConfigurationStateManager(self):
+            if val:
+                self.creg3 = self.creg3 | _CREG3_MASK_SB
+            else:
+                self.creg3 = self.creg3 & ~_CREG3_MASK_SB
+
+    @property
+    def cclk(self):
+        """
+        Gets the internal clock frequency from the CREG3 configuratinon register
+
+        Allowed values.
+            CCLK_FREQ_1024KHZ
+            CCLK_FREQ_2048KHZ
+            CCLK_FREQ_4096KHZ
+            CCLK_FREQ_8192KHZ
+        """
+        with ConfigurationStateManager(self):
+            val = self.creg3 & _CREG3_MASK_CCLK
+        return val
+
+    @property
+    def cclk_value(self):
+        """
+        Gets the internal clock frequency as a numeric value (kHz)
+        """
+        return cclk_to_value(self.cclk)
+
+    @property
+    def cclk_as_string(self):
+        """
+        Gets a the internal clock frequency as a string.
+        """
+        return f'{self.cclk_value:0.1f}kHz'
+
+    @cclk.setter
+    def cclk(self,new_cclk):
+        """
+        Sets the internal clock frequency via the CREG3 configuration register.
+
+        Allowed values.
+            CCLK_FREQ_1024KHZ
+            CCLK_FREQ_2048KHZ
+            CCLK_FREQ_4096KHZ
+            CCLK_FREQ_8192KHZ
+        """
+        with ConfigurationStateManager(self):
+            if new_cclk < _CCLK_MIN_VAL or new_cclk > _CCLK_MAX_VAL:
+                raise ValueError(f'cclk out of range: {new_cclk}')
+            self.creg3 = (self.creg3 & ~_CREG3_MASK_CCLK) | new_cclk
+            self.state_copy['cclk'] = new_cclk
+
+    @property
+    def chip_id(self):
+        """
+        Reads the value of the chip id from the AGEN Register.
+        """
+        with ConfigurationStateManager(self):
+            val = (self.read_uint8(_REG_ADDR_AGEN) & _AGEN_MASK_DEVID) >> _AGEN_SHIFT_DEVID
+        return val
+
+    @property
+    def conversion_factor(self):
+        gain_value = gain_to_value(self.state_copy['gain'])
+        time_value = integration_time_to_value(self.state_copy['integration_time'])
+        cclk_value =  cclk_to_value(self.state_copy['cclk'])
+        return 1.0/(gain_value*time_value*cclk_value)
+
+    @property
+    def divider_factor(self):
+        if self.state_copy['divider_enabled']:
+            div_factor = 1 << (1 + self.state_copy['divider'])
+        else:
+            div_factor = 1
+        return div_factor
+
+    @property
+    def measurement_sleep_dt(self):
+        return 0.001*integration_time_to_value(self.state_copy['integration_time'])
+
+    @property
+    def raw_values(self):
+        self.start_measurement()
+        time.sleep(self.measurement_sleep_dt)
+        while self.notready:
+            pass
+
+        div_factor = self.divider_factor
+        uva_raw = self.mres1_as_uint16*div_factor
+        uvb_raw = self.mres2_as_uint16*div_factor
+        uvc_raw = self.mres3_as_uint16*div_factor
+        temp_raw = self.temp_as_uint16
+
+        if self.overflow_exception:
+            if self.status_as_dict['mresof']:
+                raise AS7331Overflow("measurement register overflow")
+
+        return uva_raw, uvb_raw, uvc_raw, temp_raw
+
+    @property
+    def values(self):
+        # Get conversion factors
+        common_factor = self.conversion_factor
+        conv_factor_a = _FSRA*common_factor
+        conv_factor_b = _FSRB*common_factor
+        conv_factor_c = _FSRC*common_factor
+
+        # Get raw integer values and convert to uW/cm**2 or deg C
+        uva_raw, uvb_raw, uvc_raw, temp_raw = self.raw_values
+        uva = uva_raw*conv_factor_a
+        uvb = uvb_raw*conv_factor_b
+        uvc = uvc_raw*conv_factor_c
+        temp = temp_raw_to_celsius(temp_raw)
+        return uva, uvb, uvc, temp
+
+# Exceptions
+# -----------------------------------------------------------------------------
+
+class AS7331Overflow(Exception):
+    """
+    Measurement overflow exception. Raised when there is an overflow in one of
+    the MRESX measurement registers.
+    """
+    pass
+
+
+# Context managers
+# -----------------------------------------------------------------------------
+
+class ConfigurationStateManager:
+    """
+    Context manager for device configuration.  Puts the device into the
+    configuration state on enter and puts into the measurement state on
+    exit.
+    """
+
+    def __init__(self, obj):
+        self.obj = obj
+        super().__init__()
+
+    def __enter__(self):
+        self.obj.device_state = DEVICE_STATE_CONFIGURATION
+
+    def __exit__(self, exc_type, exc_value, exc_tb):
+        self.obj.device_state = DEVICE_STATE_MEASUREMENT
+
+
+# Utility functions
+# -----------------------------------------------------------------------------
+
+def gain_to_value(gain):
+    """
+    Converts the gain setting to the gain multipler value.
+    """
+    return 1 << (11 - gain)
+
+def integration_time_to_value(integration_time):
+    """
+    Converts the integration time setting to the integration time value in ms.
+    """
+    return 1 << integration_time
+
+def cclk_to_value(cclk):
+    """
+    Converts the cclk setting to the clock value in kHz.
+    """
+    return 1024.0*(1 << cclk)
+
+def temp_raw_to_celsius(val):
+    """
+    Converts raw integer temperature reading to degress celsius as given
+    on page 42 of the AS7331 specification document.
+    """
+    return 0.05*val - 66.9
+
+def bytes_to_uint16(lo_byte, hi_byte):
+    """
+    Converts two bytes to a uint16
+    """
+    return (hi_byte << 8) + lo_byte
+
+
+
+//gecko_controller/controller.py
+#!/usr/bin/env python3
+import os
+import time
+import math
+import smbus2
+import RPi.GPIO as GPIO
+import logging
+import logging.handlers
+from datetime import datetime, timedelta, time as datetime_time
+from PIL import Image, ImageDraw, ImageFont
+import pathlib
+from typing import Tuple, Optional
+from pathlib import Path
+
+# Constants for logging
+LOG_DIR = "/var/log/gecko-controller"
+LOG_FILE = "readings.csv"
+MAX_LOG_SIZE = 10 * 1024 * 1024  # 10MB per file
+LOG_BACKUP_COUNT = 5  # Keep 5 rotated files
+LOG_INTERVAL = 60  # seconds
+
+# Get the directory where the module is installed
+MODULE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# Import config
+try:
+    from gecko_controller.config import *
+except ImportError:
+    try:
+        import sys
+        sys.path.append('/etc/gecko-controller')
+        from config import *
+    except ImportError:
+        print("Error: Could not find configuration file")
+        print("The file should be at: /etc/gecko-controller/config.py")
+        print("Try reinstalling the package with: sudo apt install --reinstall gecko-controller")
+       
+        sys.exit(1)
+
+
+# Font loading helper
+def load_font(name: str, size: int) -> ImageFont.FreeTypeFont:
+    """Load a font, falling back to default if not found"""
+    try:
+        font_path = pathlib.Path(MODULE_DIR) / "fonts" / name
+        return ImageFont.truetype(str(font_path), size)
+    except Exception as e:
+        print(f"Warning: Could not load font {name}: {e}")
+        return ImageFont.load_default()
+
+class SSH1106Display:
+    def __init__(self, i2c_addr=0x3C, width=128, height=64):
+        self.addr = i2c_addr
+        self.width = width
+        self.height = height
+        self.pages = height // 8
+        self.buffer = [0] * (width * self.pages)
+        self.bus = smbus2.SMBus(1)
+        self.init_display()
+
+    def init_display(self):
+        """Initialize the SSH1106 display with correct rotation"""
+        init_sequence = [
+            0xAE,   # display off
+            0xD5, 0x80,  # set display clock
+            0xA8, 0x3F,  # set multiplex ratio
+            0xD3, 0x00,  # set display offset
+            0x40,   # set start line to 0
+            0x8D, 0x14,  # enable charge pump
+            0x20, 0x00,  # memory addressing mode
+            0xA0,   # segment remap (0xA1 to flip horizontal)
+            0xC0,   # COM scan direction (0xC8 to flip vertical)
+            0xDA, 0x12,  # set COM pins
+            0x81, 0xFF,  # maximum contrast
+            0xD9, 0xF1,  # set pre-charge period
+            0xDB, 0x20,  # set VCOMH
+            0xA4,   # display all on resume
+            0xA6,   # normal display (not inverted)
+            0xAF    # display on
+        ]
+        for cmd in init_sequence:
+            self.write_cmd(cmd)
+
+    def show_image(self, image: Image.Image):
+        """Display a PIL Image object"""
+        # Convert image to 1-bit color and rotate if needed
+        if image.mode != '1':
+            image = image.convert('1')
+        
+        # Rotate image 90 degrees clockwise
+        image = image.rotate(180, expand=True)
+        
+        # The SSH1106 has a 132x64 display memory, but only 128x64 is visible
+        # Create a new image with the full 132x64 size
+        full_image = Image.new('1', (132, 64), 255)  # white background
+        
+        # Paste the rotated image in the center of the 132x64 frame
+        paste_x = (132 - image.width) // 2
+        paste_y = (64 - image.height) // 2
+        full_image.paste(image, (paste_x, paste_y))
+        
+        # Set the correct position for the SSH1106
+        self.write_cmd(0x02)  # Set lower column address (to center the 128 columns in 132 width)
+        self.write_cmd(0x10)  # Set higher column address
+        
+        # Write display buffer
+        for page in range(self.pages):
+            self.write_cmd(0xB0 + page)  # Set page address
+            for x in range(132):  # Write all 132 columns
+                bits = 0
+                for bit in range(8):
+                    y = page * 8 + bit
+                    if y < 64 and x < 132:
+                        if full_image.getpixel((x, y)) == 0:  # Black pixel
+                            bits |= (1 << bit)
+                self.write_data(bits)
+
+    def write_cmd(self, cmd: int):
+        """Write a command to the display"""
+        self.bus.write_byte_data(self.addr, 0x00, cmd)
+
+    def write_data(self, data: int):
+        """Write data to the display"""
+        self.bus.write_byte_data(self.addr, 0x40, data)
+
+class GeckoController:
+    def __init__(self):
+        # GPIO Setup
+        GPIO.setmode(GPIO.BCM)
+        GPIO.setup(LIGHT_RELAY, GPIO.OUT)
+        GPIO.setup(HEAT_RELAY, GPIO.OUT)
+        
+        if hasattr(self, 'DISPLAY_RESET'):
+            GPIO.setup(DISPLAY_RESET, GPIO.OUT)
+            GPIO.output(DISPLAY_RESET, GPIO.HIGH)  # Start with reset inactive
+
+        self.setup_display()
+        self.setup_logging()
+        self.last_log_time = 0
+        self.bus = smbus2.SMBus(1)
+
+        # Convert time settings from config to datetime.time objects
+        self.light_on_time = self.parse_time_setting(LIGHT_ON_TIME)
+        self.light_off_time = self.parse_time_setting(LIGHT_OFF_TIME)
+        print(f"Light on @ {self.light_on_time}, Light off @ {self.light_off_time}\n")
+        
+        # Use thresholds from config
+        self.UVA_THRESHOLDS = UVA_THRESHOLDS
+        self.UVB_THRESHOLDS = UVB_THRESHOLDS
+        print(f"UVA Thresholds = {self.UVA_THRESHOLDS}, UVB Thresholds = {self.UVB_THRESHOLDS}\n")
+ 
+        # Calculate UV correction factor
+        self.uv_correction_factor = self.calculate_uv_correction()
+        print(f"\nUV Correction Factor: {self.uv_correction_factor:.3f}")
+        print(f"Sensor Position: {SENSOR_HEIGHT}m height, {LAMP_DIST_FROM_BACK}m from back")
+        print(f"Lamp Height: {ENCLOSURE_HEIGHT}m, Sensor Angle: {SENSOR_ANGLE}°\n")
+
+        # UV sensor configuration with fallback paths
+        try:
+            # First try relative import (when installed as package)
+            from .as7331 import AS7331, INTEGRATION_TIME_256MS, GAIN_16X, MEASUREMENT_MODE_CONTINUOUS
+        except ImportError:
+            try:
+                # Try importing from the same directory as this script
+                import os
+                import sys
+                script_dir = os.path.dirname(os.path.abspath(__file__))
+                sys.path.append(script_dir)
+                from as7331 import AS7331, INTEGRATION_TIME_256MS, GAIN_16X, MEASUREMENT_MODE_CONTINUOUS
+                print("Imported UV sensor (as7331) module ok")
+            except ImportError:
+                print("Warning: UV sensor module (AS7331) not found. UV sensing disabled")
+                print(f"Looked in: {script_dir}")
+                print("Make sure as7331.py is in the same directory as this script")
+                self.uv_sensor = None
+            else:
+                self.uv_sensor = AS7331(1)                
+                self.uv_sensor.integration_time = INTEGRATION_TIME_256MS
+                self.uv_sensor.gain = GAIN_16X
+                self.uv_sensor.measurement_mode = MEASUREMENT_MODE_CONTINUOUS
+        else:
+            self.uv_sensor = AS7331(1)
+            self.uv_sensor.integration_time = INTEGRATION_TIME_256MS
+            self.uv_sensor.gain = GAIN_16X
+            self.uv_sensor.measurement_mode = MEASUREMENT_MODE_CONTINUOUS
+            
+        if self.uv_sensor:
+            print("UV Sensor (AS7331) ready")
+            print(f"  measurement mode: {self.uv_sensor.measurement_mode_as_string}")
+            print(f"  standby state:    {self.uv_sensor.standby_state}")
+
+        # Create an image buffer
+        self.image = Image.new('1', (128, 64), 255)  # 255 = white background
+        self.draw = ImageDraw.Draw(self.image)
+
+        # Load regular font
+        self.regular_font = load_font("DejaVuSans.ttf", 10)
+
+        # Load OpenSymbol font
+        try:
+            self.icon_font = ImageFont.truetype("/usr/share/fonts/truetype/ancient-scripts/Symbola_hint.ttf", 12)
+        except Exception as e:
+            print(f"Warning: Could not load Symbola font from default path: {e}")
+            print(f"Please install the fonts-symbola package")
+            self.icon_font = ImageFont.load_default()
+            print("Using default font")
+
+        # OpenSymbol Unicode points for relevant symbols
+        self.ICON_CLOCK = "⏲"       
+        self.ICON_HUMIDITY = "🌢"         # for humidity 
+        self.ICON_THERMOMETER = "🌡"  
+        self.ICON_TARGET = "🞋"      
+        self.ICON_GOOD = "☺"       
+        self.ICON_TOO_LOW = "🌜"     
+        self.ICON_TOO_HIGH = "⚠"    
+        self.ICON_ERROR = "?"
+
+    @staticmethod
+    def parse_time_setting(time_str: str) -> datetime_time:
+        """Parse time string in HH:MM format into time object"""
+        try:
+            if ':' in time_str:
+                hours, minutes = map(int, time_str.split(':'))
+            else:
+                # Backward compatibility for hour-only settings
+                hours = int(time_str)
+                minutes = 0
+            return datetime_time(hours, minutes)
+        except (ValueError, TypeError) as e:
+            print(f"Error parsing time setting {time_str}: {e}")
+            # Default to midnight if invalid
+            return datetime_time(0, 0)
+            
+    def setup_logging(self):
+        """Configure logging with rotation"""
+        os.makedirs(LOG_DIR, exist_ok=True)
+        log_file = Path(LOG_DIR + "/" + LOG_FILE)
+        
+        # Configure main logger
+        self.logger = logging.getLogger("gecko_controller")
+        self.logger.setLevel(logging.INFO)
+        
+        # Create rotating file handler
+        handler = logging.handlers.RotatingFileHandler(
+            log_file,
+            maxBytes=MAX_LOG_SIZE,
+            backupCount=LOG_BACKUP_COUNT
+        )
+        
+        # Create formatter
+        formatter = logging.Formatter(
+            '%(asctime)s,%(temp).1f,%(humidity).1f,%(uva).4f,%(uvb).4f,%(uvc).4f,%(light)d,%(heat)d'
+        )
+        handler.setFormatter(formatter)
+        self.logger.addHandler(handler)
+
+    def setup_display(self):
+        """Initialize the display"""
+        self.display = SSH1106Display(i2c_addr=DISPLAY_ADDRESS)
+
+    def get_next_transition(self) -> Tuple[str, datetime]:
+        """Calculate time until next light state change"""
+        now = datetime.now()
+        current_time = now.time()
+        
+        # Create datetime objects for today's on/off times
+        today_on = now.replace(
+            hour=self.light_on_time.hour,
+            minute=self.light_on_time.minute,
+            second=0,
+            microsecond=0
+        )
+        today_off = now.replace(
+            hour=self.light_off_time.hour,
+            minute=self.light_off_time.minute,
+            second=0,
+            microsecond=0
+        )
+        
+        if self.light_on_time <= current_time < self.light_off_time:
+            # Lights are on, calculate time until off
+            next_time = today_off
+            if next_time < now:
+                next_time += timedelta(days=1)
+            return "→OFF", next_time
+        else:
+            # Lights are off, calculate time until on
+            next_time = today_on
+            if next_time < now:
+                next_time += timedelta(days=1)
+            return "→ON", next_time
+
+    def format_time_until(self, target_time: datetime) -> str:
+        """Format the time until the next transition"""
+        now = datetime.now()
+        diff = target_time - now
+        hours = int(diff.total_seconds() // 3600)
+        minutes = int((diff.total_seconds() % 3600) // 60)
+        return f"{hours}h{minutes:02d}m"
+
+    def calculate_uv_correction(self):
+        """Calculate UV correction factor based on geometry"""       
+        # Calculate distances and angles
+        sensor_to_lamp_horiz = LAMP_DIST_FROM_BACK  # horizontal distance from sensor to lamp
+        sensor_to_lamp_vert = ENCLOSURE_HEIGHT - SENSOR_HEIGHT  # vertical distance
+        
+        # Direct distance from sensor to lamp
+        direct_distance = math.sqrt(sensor_to_lamp_horiz**2 + sensor_to_lamp_vert**2)
+        
+        # Angle between sensor normal and lamp
+        lamp_angle = math.degrees(math.atan2(sensor_to_lamp_vert, sensor_to_lamp_horiz))
+        effective_angle = abs(lamp_angle - SENSOR_ANGLE)
+        
+        # Cosine correction for sensor angle
+        cosine_factor = math.cos(math.radians(effective_angle))
+        
+        # Inverse square law correction for distance
+        # Normalize to a reference height of 30cm (typical basking height)
+        distance_factor = (0.3 / direct_distance)**2
+        
+        # Combined correction factor
+        correction_factor = 1 / (cosine_factor * distance_factor)
+        
+        return correction_factor
+
+    def get_uv_status_icon(self, value: Optional[float], is_uvb: bool = False) -> str:
+        """Get status icon for UV readings"""
+        if value is None:
+            return self.ICON_ERROR
+
+        thresholds = self.UVB_THRESHOLDS if is_uvb else self.UVA_THRESHOLDS
+
+        if value < thresholds['low']:
+            return self.ICON_TOO_LOW
+        elif value > thresholds['high']:
+            return self.ICON_TOO_HIGH
+        else:
+            return self.ICON_GOOD
+
+    def create_display_group(self, temp, humidity, uva, uvb, uvc, light_status, heat_status):
+        """Create a new display buffer with all information"""
+        # Clear the image
+        self.draw.rectangle((0, 0, 128, 64), fill=255)  # White background
+        
+        # Top row - Time and Humidity
+        current_time = datetime.now().strftime("%H:%M")
+        self.draw.text((4, 4), self.ICON_CLOCK, font=self.icon_font, fill=0)
+        self.draw.text((20, 4), current_time, font=self.regular_font, fill=0)
+
+        # Humidity
+        humidity_text = f"{humidity:4.1f}%" if humidity is not None else "--.-%"
+        self.draw.text((68, 4), self.ICON_HUMIDITY, font=self.icon_font, fill=0)
+        self.draw.text((84, 4), humidity_text, font=self.regular_font, fill=0)
+
+        # Temperature
+        if temp is not None:
+            target_temp = self.get_target_temp()
+            temp_text = f"{temp:4.1f}C"
+            target_text = f"{target_temp:4.1f}C"
+        else:
+            temp_text = "--.-C"
+            target_text = "--.-C"
+
+        self.draw.text((4, 20), self.ICON_THERMOMETER, font=self.icon_font, fill=0)
+        self.draw.text((20, 20), temp_text, font=self.regular_font, fill=0)
+        self.draw.text((68, 20), self.ICON_TARGET, font=self.icon_font, fill=0)
+        self.draw.text((84, 20), target_text, font=self.regular_font, fill=0)
+
+        # UV readings
+        uva_icon = self.get_uv_status_icon(uva, is_uvb=False)
+        uvb_icon = self.get_uv_status_icon(uvb, is_uvb=True)
+        
+        self.draw.text((4, 36), "UVA", font=self.regular_font, fill=0)
+        self.draw.text((36, 36), uva_icon, font=self.icon_font, fill=0)
+        self.draw.text((68, 36), "UVB", font=self.regular_font, fill=0)
+        self.draw.text((100, 36), uvb_icon, font=self.icon_font, fill=0)
+
+        # Status and Schedule
+        status_text = f"{'L:ON ' if light_status else 'L:OFF'} {'H:ON' if heat_status else 'H:OFF'}"
+        self.draw.text((4, 52), status_text, font=self.regular_font, fill=0)
+
+        next_state, next_time = self.get_next_transition()
+        time_until = self.format_time_until(next_time)
+        schedule_text = f"{next_state} {time_until}"
+        
+        # Right-align the schedule text
+        schedule_width = self.draw.textlength(schedule_text, font=self.regular_font)
+        self.draw.text((124 - schedule_width, 52), schedule_text, font=self.regular_font, fill=0)
+
+        # Update the display
+        self.display.show_image(self.image)
+
+    def log_readings(self, temp, humidity, uva, uvb, uvc, light_status, heat_status):
+        """Log readings if enough time has passed"""
+        current_time = time.time()
+        if current_time - self.last_log_time >= LOG_INTERVAL:
+            self.logger.info(
+                "",
+                extra={
+                    'temp': temp if temp is not None else -1,
+                    'humidity': humidity if humidity is not None else -1,
+                    'uva': uva if uva is not None else -1,
+                    'uvb': uvb if uvb is not None else -1,
+                    'uvc': uvc if uvc is not None else -1,
+                    'light': 1 if light_status else 0,
+                    'heat': 1 if heat_status else 0
+                }
+            )
+            self.last_log_time = current_time
+
+    def read_sensor(self) -> Tuple[Optional[float], Optional[float]]:
+        """Read temperature and humidity from the sensor"""
+        try:
+            self.bus.write_i2c_block_data(0x44, 0x2C, [0x06])
+            time.sleep(0.5)
+            data = self.bus.read_i2c_block_data(0x44, 0x00, 6)
+
+            temp = data[0] * 256 + data[1]
+            cTemp = -45 + (175 * temp / 65535.0)
+            humidity = 100 * (data[3] * 256 + data[4]) / 65535.0
+
+            return cTemp, humidity
+        except Exception as e:
+            print(f"Sensor read error: {e}")
+            return None, None
+
+    def read_uv(self) -> Tuple[Optional[float], Optional[float], Optional[float]]:
+        """Read UV values from the sensor and apply geometric correction"""
+        try:
+            if self.uv_sensor is None:
+                print(f"UV sensor is None")
+                return None, None, None
+            uva, uvb, uvc, temp = self.uv_sensor.values            
+            
+            # Apply correction factor
+            if uva is not None:
+                uva = uva * self.uv_correction_factor
+            else:
+                print(f"UV sensor read error")
+                
+            if uvb is not None:
+                uvb = uvb * self.uv_correction_factor
+            if uvc is not None:
+                uvc = uvc * self.uv_correction_factor
+            
+            return uva, uvb, uvc
+        except Exception as e:
+            print(f"UV sensor read error: {e}")
+            return None, None, None
+
+    def get_target_temp(self) -> float:
+        """Get the current target temperature based on time of day"""
+        current_time = datetime.now().time()
+        return DAY_TEMP if self.light_on_time <= current_time < self.light_off_time else MIN_TEMP
+
+    def control_light(self) -> bool:
+        """Control the light relay based on time"""
+        current_time = datetime.now().time()
+        should_be_on = self.light_on_time <= current_time < self.light_off_time
+        GPIO.output(LIGHT_RELAY, GPIO.HIGH if should_be_on else GPIO.LOW)
+        return should_be_on
+ 
+    def control_heat(self, current_temp: Optional[float]) -> bool:
+        """Control the heat relay based on temperature"""
+        if current_temp is None:
+            return False
+
+        target_temp = self.get_target_temp()
+
+        if current_temp < (target_temp - TEMP_TOLERANCE):
+            GPIO.output(HEAT_RELAY, GPIO.HIGH)
+            return True
+        elif current_temp > (target_temp + TEMP_TOLERANCE):
+            GPIO.output(HEAT_RELAY, GPIO.LOW)
+            return False
+        return GPIO.input(HEAT_RELAY)
+
+    def update_display(self, temp, humidity, uva, uvb, uvc, light_status, heat_status):
+        """Update the display with current readings"""
+        self.create_display_group(temp, humidity, uva, uvb, uvc, light_status, heat_status)
+
+    def run(self):
+        """Main control loop"""
+        try:
+            self.update_display(None, None, None, None, None, False, False)
+
+            while True:
+                temp, humidity = self.read_sensor()
+                uva, uvb, uvc = self.read_uv()
+                light_status = self.control_light()
+                heat_status = self.control_heat(temp)
+                #print(temp,humidity,uva, uvb, uvc, light_status, heat_status)
+
+                if temp is not None and humidity is not None:
+                    self.update_display(temp, humidity, uva, uvb, uvc,
+                                      light_status, heat_status)
+                    self.log_readings(temp, humidity, uva, uvb, uvc,
+                                    light_status, heat_status)
+                time.sleep(10)
+
+        except KeyboardInterrupt:
+            print("\nShutting down...")
+        finally:
+            GPIO.cleanup()
+
+def main():
+    controller = GeckoController()
+    controller.run()
+
+if __name__ == "__main__":
+    main()
+
+//gecko_controller/web/__init__.py
+
+//gecko_controller/web/app.py
+#!/usr/bin/env python3
+# gecko_controller/web/app.py
+from flask import Flask, render_template, jsonify, request, send_from_directory
+import os
+import re
+import csv
+import sys
+import time
+import shutil
+import stat
+from datetime import datetime, timedelta
+from pathlib import Path
+import importlib.util
+from typing import Dict, Any, Tuple
+from typing import Tuple, Optional
+import logging
+
+def get_app_paths():
+    """Determine the correct paths for templates and static files"""
+    # In your main() function
+    os.makedirs('/etc/gecko-controller', mode=0o755, exist_ok=True)
+    os.makedirs('/var/log/gecko-controller', mode=0o755, exist_ok=True)
+
+    # Check if we're running from the development directory
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    dev_template_dir = os.path.join(current_dir, 'templates')
+    dev_static_dir = os.path.join(current_dir, 'static')
+    
+    # Check if development directories exist
+    if os.path.isdir(dev_template_dir) and os.path.isdir(dev_static_dir):
+        return dev_template_dir, dev_static_dir
+    
+    # Fall back to installed package location
+    try:
+        import pkg_resources
+        template_dir = pkg_resources.resource_filename('gecko_controller.web', 'templates')
+        static_dir = pkg_resources.resource_filename('gecko_controller.web', 'static')
+        return template_dir, static_dir
+    except ImportError:
+        # If all else fails, return the development paths anyway
+        return dev_template_dir, dev_static_dir
+
+# Initialize Flask app with correct paths
+template_dir, static_dir = get_app_paths()
+app = Flask(__name__, 
+           template_folder=template_dir,
+           static_folder=static_dir)
+
+# Rest of your existing code remains the same...
+CONFIG_FILE = '/etc/gecko-controller/config.py'
+BACKUP_FILE = '/etc/gecko-controller/config.py.bak'
+LOG_FILE = '/var/log/gecko-controller/readings.csv'
+
+# Add some debugging information at startup
+@app.before_first_request
+def log_startup_info():
+    app.logger.info(f'Current working directory: {os.getcwd()}')
+    app.logger.info(f'Template folder: {app.template_folder}')
+    app.logger.info(f'Static folder: {app.static_folder}')
+    app.logger.info(f'Template folder exists: {os.path.exists(app.template_folder)}')
+    app.logger.info(f'Static folder exists: {os.path.exists(app.static_folder)}')
+
+# Define all required fields and their types
+REQUIRED_CONFIG = {
+    # Display I2C
+    'DISPLAY_ADDRESS': ('int', lambda x: 0 <= x <= 127),  # Valid I2C address range
+    
+    # GPIO Pins
+    'LIGHT_RELAY': ('int', lambda x: 0 <= x <= 27),  # Valid GPIO range for RPi
+    'HEAT_RELAY': ('int', lambda x: 0 <= x <= 27),
+    'DISPLAY_RESET': ('int', lambda x: 0 <= x <= 27),
+    
+    # Temperature Settings
+    'MIN_TEMP': ('float', lambda x: 10.0 <= x <= 40.0),  # Reasonable temp range
+    'DAY_TEMP': ('float', lambda x: 15.0 <= x <= 40.0),
+    'TEMP_TOLERANCE': ('float', lambda x: 0.1 <= x <= 5.0),
+    
+    # Time Settings
+    'LIGHT_ON_TIME': ('time_str', lambda x: bool(re.match(r'^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$', x))),
+    'LIGHT_OFF_TIME': ('time_str', lambda x: bool(re.match(r'^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$', x))),
+    
+    # UV Thresholds
+    'UVA_THRESHOLDS': ('dict', lambda x: isinstance(x, dict) and 
+                       all(k in x for k in ['low', 'high']) and 
+                       all(isinstance(v, (int, float)) for v in x.values()) and 
+                       0 <= x['low'] <= x['high'] <= 1000),
+    'UVB_THRESHOLDS': ('dict', lambda x: isinstance(x, dict) and 
+                       all(k in x for k in ['low', 'high']) and 
+                       all(isinstance(v, (int, float)) for v in x.values()) and 
+                       0 <= x['low'] <= x['high'] <= 100),
+    
+    # UV View Factor Correction
+    'SENSOR_HEIGHT': ('float', lambda x: 0.0 <= x <= 1.0),
+    'LAMP_DIST_FROM_BACK': ('float', lambda x: 0.0 <= x <= 1.0),
+    'ENCLOSURE_HEIGHT': ('float', lambda x: 0.0 <= x <= 2.0),
+    'SENSOR_ANGLE': ('float', lambda x: 0 <= x <= 360)
+}
+
+class ConfigValidationError(Exception):
+    """Custom exception for config validation failures"""
+    pass        
+
+def validate_config_module(module) -> bool:
+    """Validate that all required fields are present and of correct type"""
+    for field, (expected_type, validator) in REQUIRED_CONFIG.items():
+        if not hasattr(module, field):
+            raise ConfigValidationError(f"Missing required field: {field}")
+            
+        value = getattr(module, field)
+        
+        # Type validation
+        if expected_type == 'int':
+            if not isinstance(value, int):
+                raise ConfigValidationError(f"Field {field} must be an integer")
+        elif expected_type == 'float':
+            if not isinstance(value, (int, float)):
+                raise ConfigValidationError(f"Field {field} must be a number")
+            value = float(value)
+        elif expected_type == 'time_str':
+            if not isinstance(value, str):
+                raise ConfigValidationError(f"Field {field} must be a time string (HH:MM)")
+        elif expected_type == 'dict':
+            if not isinstance(value, dict):
+                raise ConfigValidationError(f"Field {field} must be a dictionary")
+                
+        # Value validation
+        if not validator(value):
+            raise ConfigValidationError(f"Invalid value for {field}: {value}")
+            
+    # Additional validation: ensure DAY_TEMP > MIN_TEMP
+    if module.DAY_TEMP <= module.MIN_TEMP:
+        raise ConfigValidationError("DAY_TEMP must be greater than MIN_TEMP")
+            
+    return True
+
+def create_config_content(config: Dict[str, Any]) -> str:
+    """Generate config file content with comments"""
+    lines = [
+        "# Gecko Controller Configuration File",
+        "# This file will be installed to /etc/gecko-controller/config.py",
+        "# You can modify these values to customize your gecko enclosure settings",
+        "# The service must be restarted after changes: sudo systemctl restart gecko-controller",
+        "",
+        "# Display I2C",
+        f"DISPLAY_ADDRESS = {config['DISPLAY_ADDRESS']}",
+        "",
+        "# GPIO Pins",
+        f"LIGHT_RELAY = {config['LIGHT_RELAY']}",
+        f"HEAT_RELAY = {config['HEAT_RELAY']}",
+        f"DISPLAY_RESET = {config['DISPLAY_RESET']}",
+        "",
+        "# Temperature Settings",
+        f"MIN_TEMP = {config['MIN_TEMP']}",
+        f"DAY_TEMP = {config['DAY_TEMP']}",
+        f"TEMP_TOLERANCE = {config['TEMP_TOLERANCE']}",
+        "",
+        "# Time Settings",
+        f'LIGHT_ON_TIME = "{config["LIGHT_ON_TIME"]}"',
+        f'LIGHT_OFF_TIME = "{config["LIGHT_OFF_TIME"]}"',
+        "",
+        "# UV Thresholds # μW/cm²",
+        f"UVA_THRESHOLDS = {config['UVA_THRESHOLDS']}",
+        f"UVB_THRESHOLDS = {config['UVB_THRESHOLDS']}",
+        "",
+        "# UV View Factor Correction",
+        f"SENSOR_HEIGHT = {config['SENSOR_HEIGHT']}",
+        f"LAMP_DIST_FROM_BACK = {config['LAMP_DIST_FROM_BACK']}",
+        f"ENCLOSURE_HEIGHT = {config['ENCLOSURE_HEIGHT']}",
+        f"SENSOR_ANGLE = {config['SENSOR_ANGLE']}"
+    ]
+    return "\n".join(lines)
+
+def load_config_module(config_path: str) -> Tuple[Any, bool]:
+    """Load and validate a Python config module"""
+    try:
+        spec = importlib.util.spec_from_file_location("config", config_path)
+        if spec is None or spec.loader is None:
+            return None, False
+            
+        module = importlib.util.module_from_spec(spec)
+        sys.modules["config"] = module  # This ensures proper importing
+        spec.loader.exec_module(module)
+        
+        # Validate the loaded config
+        validate_config_module(module)
+        return module, True
+    except Exception as e:
+        print(f"Error loading config from {config_path}: {str(e)}")
+        return None, False
+
+class ConfigError(Exception):
+    """Base exception for configuration errors"""
+    pass
+
+class ConfigPermissionError(ConfigError):
+    """Raised when there are permission issues with config files"""
+    pass
+
+class ConfigBackupError(ConfigError):
+    """Raised when backup operations fail"""
+    pass
+
+def check_file_permissions(path: str) -> Tuple[bool, Optional[str]]:
+    """
+    Check if we have read/write permissions for a file or its parent directory if it doesn't exist
+    Returns: (has_permission, error_message)
+    """
+    try:
+        path_obj = Path(path)
+        
+        # If file exists, check its permissions
+        if path_obj.exists():
+            # Check if we can read and write
+            readable = os.access(path, os.R_OK)
+            writable = os.access(path, os.W_OK)
+            if not (readable and writable):
+                return False, f"Insufficient permissions for {path}. Current permissions: {stat.filemode(path_obj.stat().st_mode)}"
+                
+        # If file doesn't exist, check parent directory permissions
+        else:
+            parent = path_obj.parent
+            if not parent.exists():
+                return False, f"Parent directory {parent} does not exist"
+            if not os.access(parent, os.W_OK):
+                return False, f"Cannot write to parent directory {parent}"
+                
+        return True, None
+        
+    except Exception as e:
+        return False, f"Error checking permissions: {str(e)}"
+
+def create_backup(config_file: str, backup_file: str, logger: logging.Logger) -> bool:
+    """
+    Create a backup of the config file with proper permission checking
+    
+    Args:
+        config_file: Path to the main config file
+        backup_file: Path to the backup location
+        logger: Logger instance for recording operations
+        
+    Returns:
+        bool: True if backup was successful
+    
+    Raises:
+        ConfigPermissionError: If permission issues prevent backup
+        ConfigBackupError: If backup fails for other reasons
+    """
+    try:
+        # Check if source config exists
+        if not os.path.exists(config_file):
+            raise ConfigBackupError(f"Config file {config_file} does not exist")
+            
+        # Check permissions on source and destination
+        src_ok, src_error = check_file_permissions(config_file)
+        if not src_ok:
+            raise ConfigPermissionError(f"Source file permission error: {src_error}")
+            
+        dst_ok, dst_error = check_file_permissions(backup_file)
+        if not dst_ok:
+            raise ConfigPermissionError(f"Destination file permission error: {dst_error}")
+            
+        # Create parent directory for backup if it doesn't exist
+        backup_dir = os.path.dirname(backup_file)
+        if not os.path.exists(backup_dir):
+            try:
+                os.makedirs(backup_dir, mode=0o755, exist_ok=True)
+            except Exception as e:
+                raise ConfigPermissionError(f"Failed to create backup directory: {str(e)}")
+        
+        # Perform the backup
+        shutil.copy2(config_file, backup_file)
+        
+        # Verify the backup
+        if not os.path.exists(backup_file):
+            raise ConfigBackupError("Backup file was not created")
+            
+        # Ensure backup is readable
+        if not os.access(backup_file, os.R_OK):
+            raise ConfigPermissionError("Created backup file is not readable")
+            
+        logger.info(f"Successfully created backup at {backup_file}")
+        return True
+        
+    except (ConfigPermissionError, ConfigBackupError) as e:
+        logger.error(str(e))
+        raise
+    except Exception as e:
+        msg = f"Unexpected error during backup: {str(e)}"
+        logger.error(msg)
+        raise ConfigBackupError(msg)
+
+def restore_backup(config_file: str, backup_file: str, logger: logging.Logger) -> bool:
+    """
+    Restore config from backup with proper permission checking
+    
+    Args:
+        config_file: Path to the main config file
+        backup_file: Path to the backup location
+        logger: Logger instance for recording operations
+        
+    Returns:
+        bool: True if restoration was successful
+    
+    Raises:
+        ConfigPermissionError: If permission issues prevent restoration
+        ConfigBackupError: If restoration fails for other reasons
+    """
+    try:
+        # Check if backup exists
+        if not os.path.exists(backup_file):
+            raise ConfigBackupError("No backup file found")
+            
+        # Check permissions
+        src_ok, src_error = check_file_permissions(backup_file)
+        if not src_ok:
+            raise ConfigPermissionError(f"Backup file permission error: {src_error}")
+            
+        dst_ok, dst_error = check_file_permissions(config_file)
+        if not dst_ok:
+            raise ConfigPermissionError(f"Config file permission error: {dst_error}")
+            
+        # Perform the restoration
+        shutil.copy2(backup_file, config_file)
+        
+        # Verify the restoration
+        if not os.path.exists(config_file):
+            raise ConfigBackupError("Config file was not restored")
+            
+        # Ensure restored file is readable
+        if not os.access(config_file, os.R_OK):
+            raise ConfigPermissionError("Restored config file is not readable")
+            
+        logger.info(f"Successfully restored config from {backup_file}")
+        return True
+        
+    except (ConfigPermissionError, ConfigBackupError) as e:
+        logger.error(str(e))
+        raise
+    except Exception as e:
+        msg = f"Unexpected error during restoration: {str(e)}"
+        logger.error(msg)
+        raise ConfigBackupError(msg)
+
+def write_config(config: Dict[str, Any], logger: Optional[logging.Logger] = None) -> bool:
+    """
+    Write config to file with atomic operation and validation
+    
+    Args:
+        config: Dictionary containing configuration values
+        logger: Optional logger instance for recording operations
+    
+    Returns:
+        bool: True if write was successful
+    
+    Raises:
+        ConfigPermissionError: If permission issues prevent writing
+        ConfigValidationError: If the new config is invalid
+    """
+    # Use a null logger if none provided
+    if logger is None:
+        logger = logging.getLogger('null')
+        logger.addHandler(logging.NullHandler())
+
+    try:
+        # First validate the new config values before writing anything
+        for field, (expected_type, validator) in REQUIRED_CONFIG.items():
+            if field not in config:
+                raise ConfigValidationError(f"Missing required field: {field}")
+                
+            value = config[field]
+            
+            # Perform type checking
+            if expected_type == 'int':
+                if not isinstance(value, int):
+                    raise ConfigValidationError(f"Field {field} must be an integer")
+            elif expected_type == 'float':
+                if not isinstance(value, (int, float)):
+                    raise ConfigValidationError(f"Field {field} must be a number")
+                value = float(value)
+            elif expected_type == 'time_str':
+                if not isinstance(value, str):
+                    raise ConfigValidationError(f"Field {field} must be a time string (HH:MM)")
+            elif expected_type == 'dict':
+                if not isinstance(value, dict):
+                    raise ConfigValidationError(f"Field {field} must be a dictionary")
+                    
+            # Perform value validation
+            if not validator(value):
+                raise ConfigValidationError(f"Invalid value for {field}: {value}")
+        
+        # Check special case: DAY_TEMP > MIN_TEMP
+        if config['DAY_TEMP'] <= config['MIN_TEMP']:
+            raise ConfigValidationError("DAY_TEMP must be greater than MIN_TEMP")
+            
+        # Check permissions on config file
+        ok, error = check_file_permissions(CONFIG_FILE)
+        if not ok:
+            raise ConfigPermissionError(f"Config file permission error: {error}")
+            
+        # Generate the new config content
+        content = create_config_content(config)
+        
+        # Write to a temporary file first (atomic operation)
+        temp_file = f"{CONFIG_FILE}.tmp"
+        try:
+            with open(temp_file, 'w') as f:
+                f.write(content)
+                # Ensure content is written to disk
+                f.flush()
+                os.fsync(f.fileno())
+                
+            # Set permissions on temp file to match intended config file
+            os.chmod(temp_file, 0o644)
+            
+            # Atomically replace the old config with the new one
+            os.replace(temp_file, CONFIG_FILE)
+            
+        except Exception as e:
+            # Clean up temp file if it exists
+            if os.path.exists(temp_file):
+                try:
+                    os.unlink(temp_file)
+                except:
+                    pass
+            raise ConfigError(f"Failed to write config: {str(e)}")
+            
+        # Validate the newly written config
+        module, success = load_config_module(CONFIG_FILE)
+        if not success or module is None:
+            raise ConfigValidationError("New config file failed validation after writing")
+            
+        logger.info("Successfully wrote and validated new configuration")
+        return True
+        
+    except (ConfigValidationError, ConfigPermissionError) as e:
+        logger.error(str(e))
+        raise
+    except Exception as e:
+        msg = f"Unexpected error writing config: {str(e)}"
+        logger.error(msg)
+        raise ConfigError(msg)
+
+@app.route('/api/config', methods=['POST'])
+def update_config():
+    """Update configuration with validation and rollback"""
+    try:
+        new_config = request.get_json()
+        
+        # Verify all required fields are present
+        missing_fields = [field for field in REQUIRED_CONFIG.keys() if field not in new_config]
+        if missing_fields:
+            return jsonify({
+                'status': 'error',
+                'message': f'Missing required fields: {", ".join(missing_fields)}'
+            }), 400
+        
+        # Create backup first
+        try:
+            create_backup(CONFIG_FILE, BACKUP_FILE, app.logger)
+        except ConfigPermissionError as e:
+            return jsonify({
+                'status': 'error',
+                'message': f'Permission error: {str(e)}'
+            }), 403
+        except ConfigBackupError as e:
+            return jsonify({
+                'status': 'error',
+                'message': f'Backup error: {str(e)}'
+            }), 500
+            
+        # Write and validate new config
+        try:
+            if write_config(new_config, app.logger):
+                time.sleep(0.5)
+                os.system('systemctl restart gecko-controller')
+                return jsonify({'status': 'success'})
+        except ConfigValidationError as e:
+            # Try to restore from backup
+            try:
+                restore_backup(CONFIG_FILE, BACKUP_FILE, app.logger)
+                return jsonify({
+                    'status': 'error',
+                    'message': f'Config validation failed and restored from backup: {str(e)}'
+                }), 400
+            except (ConfigPermissionError, ConfigBackupError) as restore_error:
+                return jsonify({
+                    'status': 'error',
+                    'message': f'Config validation failed and backup restoration also failed: {str(restore_error)}'
+                }), 500
+        except Exception as e:
+            # Try to restore from backup
+            try:
+                restore_backup(CONFIG_FILE, BACKUP_FILE, app.logger)
+                return jsonify({
+                    'status': 'error',
+                    'message': f'Config update failed and restored from backup: {str(e)}'
+                }), 500
+            except (ConfigPermissionError, ConfigBackupError) as restore_error:
+                return jsonify({
+                    'status': 'error',
+                    'message': f'Config update failed and backup restoration also failed: {str(restore_error)}'
+                }), 500
+                
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': f'Unexpected error: {str(e)}'
+        }), 500
+
+@app.route('/api/config/restore', methods=['POST'])
+def restore_config_endpoint():
+    """
+    Endpoint to restore config from backup with comprehensive validation and error handling
+    
+    Returns:
+        JSON response indicating success or detailed error information
+        HTTP status codes:
+        - 200: Success
+        - 403: Permission denied
+        - 404: Backup not found
+        - 500: Server error or validation failure
+    """
+    try:
+        # First verify backup exists and is readable
+        if not os.path.exists(BACKUP_FILE):
+            return jsonify({
+                'status': 'error',
+                'message': 'No backup file found'
+            }), 404
+
+        # Pre-validate backup content before attempting restore
+        module, success = load_config_module(BACKUP_FILE)
+        if not success or module is None:
+            return jsonify({
+                'status': 'error',
+                'message': 'Backup file failed validation, cannot restore'
+            }), 500
+
+        try:
+            # Attempt to restore using the improved restore_backup function
+            if restore_backup(CONFIG_FILE, BACKUP_FILE, app.logger):
+                # Double check the restored config
+                restored_module, restored_success = load_config_module(CONFIG_FILE)
+                if not restored_success or restored_module is None:
+                    # If validation fails after restore, try to recover
+                    app.logger.error("Restored config failed validation")
+                    return jsonify({
+                        'status': 'error',
+                        'message': 'Restored config failed validation'
+                    }), 500
+
+                # Brief pause to ensure file operations are complete
+                time.sleep(0.5)
+                
+                try:
+                    # Attempt to restart the service
+                    result = os.system('systemctl restart gecko-controller')
+                    if result != 0:
+                        app.logger.warning("Service restart failed but config was restored")
+                        return jsonify({
+                            'status': 'partial',
+                            'message': 'Config restored but service restart failed'
+                        }), 500
+                    
+                    return jsonify({
+                        'status': 'success',
+                        'message': 'Configuration restored and service restarted'
+                    })
+                    
+                except Exception as service_error:
+                    app.logger.error(f"Service restart error: {str(service_error)}")
+                    return jsonify({
+                        'status': 'partial',
+                        'message': 'Config restored but service restart failed'
+                    }), 500
+
+        except ConfigPermissionError as e:
+            app.logger.error(f"Permission error during restore: {str(e)}")
+            return jsonify({
+                'status': 'error',
+                'message': f'Permission denied: {str(e)}'
+            }), 403
+            
+        except ConfigBackupError as e:
+            app.logger.error(f"Backup error during restore: {str(e)}")
+            return jsonify({
+                'status': 'error',
+                'message': f'Backup error: {str(e)}'
+            }), 500
+                
+    except Exception as e:
+        app.logger.error(f"Unexpected error in restore endpoint: {str(e)}")
+        return jsonify({
+            'status': 'error',
+            'message': f'Unexpected error: {str(e)}'
+        }), 500
+
+def get_service_status():
+    """Helper function to check gecko-controller service status"""
+    try:
+        result = os.system('systemctl is-active --quiet gecko-controller')
+        return result == 0
+    except:
+        return False
+
+# Optional: Add a status endpoint to check service health
+@app.route('/api/status', methods=['GET'])
+def get_status():
+    """Get current service and config status"""
+    try:
+        config_exists = os.path.exists(CONFIG_FILE)
+        backup_exists = os.path.exists(BACKUP_FILE)
+        service_running = get_service_status()
+        
+        # Try to validate current config
+        config_valid = False
+        if config_exists:
+            module, success = load_config_module(CONFIG_FILE)
+            config_valid = success and module is not None
+            
+        return jsonify({
+            'status': 'ok',
+            'details': {
+                'config_exists': config_exists,
+                'config_valid': config_valid,
+                'backup_exists': backup_exists,
+                'service_running': service_running,
+                'config_path': CONFIG_FILE,
+                'backup_path': BACKUP_FILE
+            }
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+def read_config() -> dict:
+    """
+    Read and validate the current configuration file.
+    Returns a dictionary of configuration values or default values if the file cannot be read.
+    """
+    try:
+        # Load and validate the config module
+        module, success = load_config_module(CONFIG_FILE)
+        
+        if not success or module is None:
+            raise ConfigValidationError("Failed to load configuration file")
+            
+        # Convert config module attributes to dictionary
+        config = {}
+        for field in REQUIRED_CONFIG.keys():
+            value = getattr(module, field)
+            
+            # Handle special cases for formatting
+            if field == 'DISPLAY_ADDRESS':
+                # Convert integer to hex string format
+                config[field] = f"0x{value:02x}"
+            elif REQUIRED_CONFIG[field][0] == 'time_str':
+                # Ensure time strings are in HH:MM format
+                if isinstance(value, str):
+                    try:
+                        parsed_time = datetime.strptime(value, '%H:%M')
+                        value = parsed_time.strftime('%H:%M')
+                    except ValueError:
+                        raise ConfigValidationError(f"Invalid time format for {field}: {value}")
+                config[field] = value
+            else:
+                config[field] = value
+            
+        return config
+        
+    except Exception as e:
+        print(f"Error reading config: {str(e)}")
+        # Return default values as a fallback
+        return {
+            'DISPLAY_ADDRESS': '0x3c',  # Note: Now returning as hex string
+            'LIGHT_RELAY': 17,
+            'HEAT_RELAY': 18,
+            'DISPLAY_RESET': 27,
+            'MIN_TEMP': 20.0,
+            'DAY_TEMP': 25.0,
+            'TEMP_TOLERANCE': 0.5,
+            'LIGHT_ON_TIME': '08:00',
+            'LIGHT_OFF_TIME': '20:00',
+            'UVA_THRESHOLDS': {'low': 100, 'high': 500},
+            'UVB_THRESHOLDS': {'low': 10, 'high': 50},
+            'SENSOR_HEIGHT': 0.15,
+            'LAMP_DIST_FROM_BACK': 0.1,
+            'ENCLOSURE_HEIGHT': 0.6,
+            'SENSOR_ANGLE': 45
+        }
+        
+def read_logs(hours=24):
+    """Read the last N hours of log data"""
+    data = {
+        'timestamps': [],
+        'temperature': [],
+        'humidity': [],
+        'uva': [],
+        'uvb': [],
+        'uvc': [],
+        'light': [],
+        'heat': []
+    }
+    
+    try:
+        cutoff_time = datetime.now() - timedelta(hours=hours)
+        
+        # Create a list to store full timestamps and data
+        entries = []
+        
+        with open(LOG_FILE, 'r') as f:
+            reader = csv.reader(f)
+            for row in reader:
+                try:
+                    # Create full timestamp object for proper sorting
+                    timestamp = datetime.strptime(row[0] + "." + row[1], '%Y-%m-%d %H:%M:%S.%f')
+                    
+                    # Skip entries older than cutoff
+                    if timestamp < cutoff_time:
+                        continue
+                        
+                    entries.append({
+                        'timestamp': timestamp,
+                        'display_time': timestamp.strftime('%H:%M'),
+                        'temperature': float(row[2]),
+                        'humidity': float(row[3]),
+                        'uva': float(row[4]),
+                        'uvb': float(row[5]),
+                        'uvc': float(row[6]),
+                        'light': int(row[7]),
+                        'heat': int(row[8])
+                    })
+                    
+                except (ValueError, IndexError) as e:
+                    print(f"Error parsing log entry: {e}")
+                    continue
+                    
+        # Sort entries by timestamp
+        entries.sort(key=lambda x: x['timestamp'])
+        
+        # Fill the data arrays with sorted values
+        for entry in entries:
+            data['timestamps'].append(entry['display_time'])
+            data['temperature'].append(entry['temperature'])
+            data['humidity'].append(entry['humidity'])
+            data['uva'].append(entry['uva'])
+            data['uvb'].append(entry['uvb'])
+            data['uvc'].append(entry['uvc'])
+            data['light'].append(entry['light'])
+            data['heat'].append(entry['heat'])
+            
+    except FileNotFoundError:
+        print(f"Log file not found: {LOG_FILE}")
+    except Exception as e:
+        print(f"Error reading logs: {e}")
+        
+    return data
+
+@app.route('/static/<path:path>')
+def send_static(path):
+    app.logger.debug(f'Static file requested: {path}')
+    try:
+        full_path = os.path.join(app.static_folder, path)
+        app.logger.debug(f'Full path: {full_path}')
+        app.logger.debug(f'File exists: {os.path.exists(full_path)}')
+        return send_from_directory(app.static_folder, path)
+    except Exception as e:
+        app.logger.error(f'Error serving static file {path}: {str(e)}')
+        return str(e), 404
+
+@app.route('/')
+def index():
+    """Render the main page"""
+    try:
+        app.logger.debug('Index route accessed')
+        app.logger.debug(f'Static folder: {app.static_folder}')
+        app.logger.debug(f'Template folder: {app.template_folder}')
+        config = read_config()
+        app.logger.debug(f'Config loaded: {config}')
+        return render_template('index.html', config=config)
+    except Exception as e:
+        app.logger.error(f'Error rendering index: {str(e)}')
+        return str(e), 500
+
+@app.route('/api/config', methods=['GET'])
+def get_config():
+    """Get current configuration"""
+    app.logger.debug('/api/config accessed')
+    return jsonify(read_config())
+
+
+@app.route('/api/logs')
+def get_logs():
+    """Get log data"""
+    app.logger.debug('/api/logs accessed')
+    hours = request.args.get('hours', default=24, type=int)
+    print(f"Received log request for past {hours} hours")
+            
+    data = read_logs(hours)
+    print(f"Returning {len(data['timestamps'])} data points")
+            
+    return jsonify(data)
+    
+@app.after_request
+def add_header(response):
+    response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, post-check=0, pre-check=0, max-age=0'
+    response.headers['Pragma'] = 'no-cache'
+    response.headers['Expires'] = '-1'
+    return response
+    
+def main():
+    app.logger.info('Starting Flask application...')
+    app.run(host='0.0.0.0', port=80)
+
+if __name__ == '__main__':
+    main()
+
+//gecko_controller/web/static/app.js
+// Declare chart variables globally so we can access them in updateCharts
+let tempHumidityChart = null;
+let uvChart = null;
+
+console.log('Script loaded');
+
+// Create status monitor container element and styling
+const statusStyles = `
+.status-container {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    z-index: 1000;
+}
+
+.status-icon {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: white;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    transition: transform 0.2s ease;
+}
+
+.status-icon:hover {
+    transform: scale(1.05);
+}
+
+.status-icon.running::after {
+    content: '';
+    position: absolute;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: #4CAF50;
+    border: 2px solid white;
+    box-shadow: 0 0 0 2px rgba(76, 175, 80, 0.2);
+}
+
+.status-icon.stopped::after {
+    content: '';
+    position: absolute;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: #f44336;
+    border: 2px solid white;
+    box-shadow: 0 0 0 2px rgba(244, 67, 54, 0.2);
+}
+
+.status-details-card {
+    position: absolute;
+    top: 50px;
+    right: 0;
+    width: 300px;
+    background: white;
+    border-radius: 8px;
+    padding: 15px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    display: none;
+    animation: fadeIn 0.2s ease;
+}
+
+.status-details-card.visible {
+    display: block;
+}
+
+.status-details-card.running {
+    border-left: 4px solid #4CAF50;
+}
+
+.status-details-card.stopped {
+    border-left: 4px solid #f44336;
+}
+
+.status-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 10px;
+    font-weight: bold;
+}
+
+.status-details {
+    font-size: 0.9em;
+    color: #666;
+    margin-top: 8px;
+}
+
+.status-timestamp {
+    font-size: 0.8em;
+    color: #999;
+    margin-top: 5px;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(-10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+/* Add pulse animation for initial attention */
+@keyframes pulse {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.1); }
+    100% { transform: scale(1); }
+}
+
+.status-icon.pulse {
+    animation: pulse 2s ease infinite;
+}
+.status-controls {
+    position: absolute;
+    top: 5px;
+    left: -95px;
+    display: flex;
+    flex-direction: row;
+    gap: 10px;
+}
+
+.control-indicator {
+    width: 35px;
+    height: 35px;
+    border-radius: 50%;
+    background: white;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+}
+
+.control-indicator i {
+    font-size: 18px;
+    color: #666;
+}
+
+.control-indicator::after {
+    content: '';
+    position: absolute;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    bottom: 2px;
+    right: 2px;
+    border: 2px solid white;
+}
+
+.control-indicator.active::after {
+    background: #4CAF50;
+    box-shadow: 0 0 0 2px rgba(76, 175, 80, 0.2);
+}
+
+.control-indicator.inactive::after {
+    background: #666;
+    box-shadow: 0 0 0 2px rgba(102, 102, 102, 0.2);
+}
+
+@keyframes fade {
+    0% { opacity: 0.4; }
+    50% { opacity: 1; }
+    100% { opacity: 0.4; }
+}
+
+.control-indicator.active i {
+    color: #ff9800;
+    animation: fade 2s infinite;
+}
+
+.control-indicator .tooltip {
+    position: absolute;
+    background: rgba(0, 0, 0, 0.8);
+    color: white;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 12px;
+    white-space: nowrap;
+    left: -100px;
+    opacity: 0;
+    transition: opacity 0.2s;
+    pointer-events: none;
+}
+
+.control-indicator:hover .tooltip {
+    opacity: 1;
+}
+`;
+
+// Add styles to document
+const styleSheet = document.createElement("style");
+styleSheet.textContent = statusStyles;
+document.head.appendChild(styleSheet);
+
+// Status monitor functionality
+let statusCheckInterval = null;
+
+// Add these SVG icons for light and heat
+const ICONS = {
+    light: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="5"></circle>
+        <line x1="12" y1="1" x2="12" y2="3"></line>
+        <line x1="12" y1="21" x2="12" y2="23"></line>
+        <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+        <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+        <line x1="1" y1="12" x2="3" y2="12"></line>
+        <line x1="21" y1="12" x2="23" y2="12"></line>
+        <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+        <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+    </svg>`,
+    heat: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 2v20M8 6l8 4-8 4 8 4"></path>
+    </svg>`
+};
+
+// Update the status monitoring functions
+let lastLightStatus = false;
+let lastHeatStatus = false;
+
+async function updateControlStatus() {
+    try {
+        const response = await fetch('/api/logs');
+        if (!response.ok) throw new Error('Failed to fetch control status');
+        const data = await response.json();
+        
+        // Get the most recent status
+        const lastIndex = data.light.length - 1;
+        if (lastIndex >= 0) {
+            lastLightStatus = Boolean(data.light[lastIndex]);
+            lastHeatStatus = Boolean(data.heat[lastIndex]);
+            
+            updateControlIndicators();
+        }
+    } catch (error) {
+        console.error('Error updating control status:', error);
+    }
+}
+
+function updateControlIndicators() {
+    const controlsContainer = document.querySelector('.status-controls');
+    if (!controlsContainer) return;
+    
+    // Update light indicator
+    const lightIndicator = controlsContainer.querySelector('.control-indicator.light-indicator');
+    if (lightIndicator) {
+        lightIndicator.className = `control-indicator light ${lastLightStatus ? 'active' : 'inactive'}`;
+        lightIndicator.querySelector('.tooltip').textContent = `Light: ${lastLightStatus ? 'ON' : 'OFF'}`;
+    }
+    
+    // Update heat indicator
+    const heatIndicator = controlsContainer.querySelector('.control-indicator.heat-indicator');
+    if (heatIndicator) {
+        heatIndicator.className = `control-indicator heat ${lastHeatStatus ? 'active' : 'inactive'}`;
+        heatIndicator.querySelector('.tooltip').textContent = `Heat: ${lastHeatStatus ? 'ON' : 'OFF'}`;
+    }
+}
+
+// Single, unified initializeStatusMonitor function
+function initializeStatusMonitor() {
+    let container = document.getElementById('statusContainer');
+    if (!container) {
+        container = document.createElement('div');
+        container.id = 'statusContainer';
+        container.className = 'status-container';
+        
+        // Create controls container
+        const controlsContainer = document.createElement('div');
+        controlsContainer.className = 'status-controls';
+        
+        // Add light indicator
+        const lightIndicator = document.createElement('div');
+        lightIndicator.className = 'control-indicator light-indicator inactive';
+        lightIndicator.innerHTML = `
+            ${ICONS.light}
+            <span class="tooltip">Light: OFF</span>
+        `;
+        controlsContainer.appendChild(lightIndicator);
+        
+        // Add heat indicator
+        const heatIndicator = document.createElement('div');
+        heatIndicator.className = 'control-indicator heat-indicator inactive';
+        heatIndicator.innerHTML = `
+            ${ICONS.heat}
+            <span class="tooltip">Heat: OFF</span>
+        `;
+        controlsContainer.appendChild(heatIndicator);
+        
+        // Create main status icon
+        const icon = document.createElement('div');
+        icon.className = 'status-icon stopped pulse';
+        
+        // Create details card
+        const detailsCard = document.createElement('div');
+        detailsCard.className = 'status-details-card';
+        
+        // Add click handlers
+        icon.addEventListener('click', () => {
+            detailsCard.classList.toggle('visible');
+            icon.classList.remove('pulse');
+        });
+        
+        document.addEventListener('click', (event) => {
+            if (!container.contains(event.target)) {
+                detailsCard.classList.remove('visible');
+            }
+        });
+        
+        // Add all elements to container
+        container.appendChild(controlsContainer);
+        container.appendChild(icon);
+        container.appendChild(detailsCard);
+        document.body.appendChild(container);
+    }
+
+    // Start status checking
+    updateStatus();
+    updateControlStatus();
+    
+    if (statusCheckInterval) {
+        clearInterval(statusCheckInterval);
+    }
+    statusCheckInterval = setInterval(() => {
+        updateStatus();
+        updateControlStatus();
+    }, 30000);
+}
+
+async function updateStatus() {
+    const container = document.getElementById('statusContainer');
+    if (!container) return;
+
+    try {
+        const response = await fetch('/api/status');
+        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+        const data = await response.json();
+        
+        const timestamp = new Date().toLocaleTimeString();
+        const status = data.details.service_running ? 'running' : 'stopped';
+        
+        // Update the icon state
+        const icon = container.querySelector('.status-icon');
+        icon.className = `status-icon ${status}`;
+        
+        // Update the details card
+        const detailsCard = container.querySelector('.status-details-card');
+        if (detailsCard) {
+            detailsCard.className = `status-details-card ${status}${detailsCard.classList.contains('visible') ? ' visible' : ''}`;
+            detailsCard.innerHTML = `
+                <div class="status-header">
+                    Service: ${status === 'running' ? 'Running' : 'Stopped'}
+                </div>
+                <div class="status-details">
+                    <div>Configuration: ${data.details.config_valid ? 'Valid' : 'Invalid'}</div>
+                    <div>Backup Available: ${data.details.backup_exists ? 'Yes' : 'No'}</div>
+                </div>
+                <div class="status-timestamp">
+                    Last Updated: ${timestamp}
+                </div>
+            `;
+        }
+    } catch (error) {
+        const icon = container.querySelector('.status-icon');
+        icon.className = 'status-icon stopped';
+        
+        const detailsCard = container.querySelector('.status-details-card');
+        if (detailsCard) {
+            detailsCard.className = `status-details-card stopped${detailsCard.classList.contains('visible') ? ' visible' : ''}`;
+            detailsCard.innerHTML = `
+                <div class="status-header">
+                    Status Check Failed
+                </div>
+                <div class="status-details">
+                    ${error.message}
+                </div>
+                <div class="status-timestamp">
+                    ${new Date().toLocaleTimeString()}
+                </div>
+            `;
+        }
+    }
+}
+
+async function mountStatusMonitor() {
+    const container = document.getElementById('statusContainer');
+    const StatusMonitor = await import('./StatusMonitor.jsx');
+    ReactDOM.render(React.createElement(StatusMonitor.default), container);
+}
+
+// Wait for everything to be ready
+document.addEventListener('DOMContentLoaded', function() {
+    // Initialize status monitor
+    initializeStatusMonitor();
+
+    // Initialize charts
+    try {
+    
+        // Test Chart.js availability
+        if (typeof Chart === 'undefined') {
+            console.error('Chart.js not loaded');
+            return;
+        }
+
+        // Register the controllers and elements we need
+        Chart.register(Chart.LineController, Chart.LineElement, Chart.PointElement, Chart.LinearScale, Chart.CategoryScale, Chart.Legend, Chart.Tooltip);
+
+        tempHumidityChart = new Chart(
+            document.getElementById('tempHumidityChart'),
+            {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [
+                        {
+                            label: 'Temperature (°C)',
+                            borderColor: 'rgb(255, 99, 132)',
+                            yAxisID: 'y',
+                            tension: 0.1,
+                            data: []
+                        },
+                        {
+                            label: 'Humidity (%)',
+                            borderColor: 'rgb(54, 162, 235)',
+                            yAxisID: 'y1',
+                            tension: 0.1,
+                            data: []
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    interaction: {
+                        mode: 'index',
+                        intersect: false,
+                    },
+                    scales: {
+                        x: {
+                            type: 'category',
+                            display: true
+                        },
+                        y: {
+                            type: 'linear',
+                            display: true,
+                            position: 'left',
+                        },
+                        y1: {
+                            type: 'linear',
+                            display: true,
+                            position: 'right',
+                            grid: {
+                                drawOnChartArea: false,
+                            },
+                        }
+                    }
+                }
+            }
+        );
+
+        uvChart = new Chart(
+            document.getElementById('uvChart'),
+            {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [
+                        {
+                            label: 'UVA (mW/cm²)',
+                            borderColor: 'rgb(255, 159, 64)',
+                            yAxisID: 'y',
+                            tension: 0.1,
+                            data: []
+                        },
+                        {
+                            label: 'UVB (mW/cm²)',
+                            borderColor: 'rgb(75, 192, 192)',
+                            yAxisID: 'y1',
+                            tension: 0.1,
+                            data: []
+                        },
+                        {
+                            label: 'UVC (mW/cm²)',
+                            borderColor: 'rgb(153, 102, 255)',
+                            yAxisID: 'y1',
+                            tension: 0.1,
+                            data: []
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    interaction: {
+                        mode: 'index',
+                        intersect: false,
+                    },
+                    scales: {
+                        x: {
+                            type: 'category',
+                            display: true
+                        },
+                        y: {
+                            type: 'linear',
+                            display: true,
+                            position: 'left',
+                            title: {
+                                display: true,
+                                text: 'UVA (mW/cm²)'
+                            },
+                            beginAtZero: true,
+                            min:0,
+                            suggestedMax: 200
+                        },
+                        y1: {
+                            type: 'linear',
+                            display: true,
+                            position: 'right',
+                            title: {
+                                display: true,
+                                text: 'UVB/UVC (mW/cm²)'
+                            },
+                            beginAtZero: true,
+                            min:0,
+                            suggestedMax: 10,
+                            grid: {
+                                drawOnChartArea: false,
+                            },
+                        }
+                    }
+                }
+            }
+        );
+
+        // Start updating charts
+        updateCharts();
+        // Update every 60 seconds
+        setInterval(updateCharts, 60000);
+
+    } catch (error) {
+        console.error('Error initializing charts:', error);
+    }
+});
+
+// Functions
+async function updateCharts() {
+    try {
+        const response = await fetch('/api/logs');
+        
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        
+        // Update temperature/humidity chart
+        if (tempHumidityChart) {
+            tempHumidityChart.data.labels = data.timestamps;
+            tempHumidityChart.data.datasets[0].data = data.temperature;
+            tempHumidityChart.data.datasets[1].data = data.humidity;
+            tempHumidityChart.update();
+        }
+
+        // Update UV chart
+        if (uvChart) {
+            uvChart.data.labels = data.timestamps;
+            uvChart.data.datasets[0].data = data.uva;
+            uvChart.data.datasets[1].data = data.uvb;
+            uvChart.data.datasets[2].data = data.uvc;
+            uvChart.update();
+        }
+        
+        // Also check service status
+        const statusResponse = await fetch('/api/status');
+        if (statusResponse.ok) {
+            const statusData = await statusResponse.json();
+        }
+
+    } catch (error) {
+        console.error('Error in updateCharts:', error);
+    }
+}
+
+// Function to format I2C address
+function formatI2CAddress(input) {
+    let value;
+    // If input is an element, get its value, otherwise treat input as the value
+    if (input instanceof HTMLElement) {
+        value = input.value;
+    } else {
+        value = String(input);
+    }
+    
+    // Remove any existing "0x" prefix and spaces
+    value = value.replace(/^0x/i, '').replace(/\s/g, '');
+    
+    // Remove any non-hex characters
+    value = value.replace(/[^0-9A-Fa-f]/g, '');
+    
+    // Limit to 2 characters
+    value = value.slice(0, 2);
+    
+    // Return formatted value or set input value if element was passed
+    const formattedValue = value ? `0x${value.toLowerCase()}` : '';
+    if (input instanceof HTMLElement) {
+        input.value = formattedValue;
+    }
+    return formattedValue;
+}
+// Initialize when page loads
+document.addEventListener('DOMContentLoaded', function() {
+    const i2cInput = document.getElementById('DISPLAY_ADDRESS');
+    if (i2cInput) {
+        formatI2CAddress(i2cInput);
+    }
+});
+
+async function loadConfig() {
+    try {
+        const response = await fetch('/api/config');
+        const config = await response.json();
+        console.log('Loaded config:', config);
+
+        // Temperature settings
+        document.getElementById('MIN_TEMP').value = config.MIN_TEMP;
+        document.getElementById('DAY_TEMP').value = config.DAY_TEMP;
+        document.getElementById('TEMP_TOLERANCE').value = config.TEMP_TOLERANCE;
+
+        // Lighting schedule
+        document.getElementById('LIGHT_ON_TIME').value = config.LIGHT_ON_TIME;
+        document.getElementById('LIGHT_OFF_TIME').value = config.LIGHT_OFF_TIME;
+
+        // UV Thresholds
+        document.getElementById('UVA_THRESHOLDS_low').value = config.UVA_THRESHOLDS.low;
+        document.getElementById('UVA_THRESHOLDS_high').value = config.UVA_THRESHOLDS.high;
+        document.getElementById('UVB_THRESHOLDS_low').value = config.UVB_THRESHOLDS.low;
+        document.getElementById('UVB_THRESHOLDS_high').value = config.UVB_THRESHOLDS.high;
+
+        // UV Sensor Configuration
+        document.getElementById('SENSOR_HEIGHT').value = config.SENSOR_HEIGHT;
+        document.getElementById('LAMP_DIST_FROM_BACK').value = config.LAMP_DIST_FROM_BACK;
+        document.getElementById('ENCLOSURE_HEIGHT').value = config.ENCLOSURE_HEIGHT;
+        document.getElementById('SENSOR_ANGLE').value = config.SENSOR_ANGLE;
+
+        // Hardware Configuration
+        const displayAddressInput = document.getElementById('DISPLAY_ADDRESS');
+        displayAddressInput.value = formatI2CAddress(config.DISPLAY_ADDRESS);
+        document.getElementById('DISPLAY_RESET').value = config.DISPLAY_RESET;
+        document.getElementById('LIGHT_RELAY').value = config.LIGHT_RELAY;
+        document.getElementById('HEAT_RELAY').value = config.HEAT_RELAY;
+
+    } catch (error) {
+        console.error('Error loading config:', error);
+        const status = document.getElementById('status');
+        status.textContent = 'Error loading configuration: ' + error.message;
+        status.className = 'status error';
+        status.style.display = 'block';
+        setTimeout(() => {
+            status.style.display = 'none';
+        }, 3000);
+    }
+}
+// Call loadConfig when the page loads
+document.addEventListener('DOMContentLoaded', loadConfig);
+
+// Handle form submission
+document.getElementById('configForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    
+    const formData = new FormData(e.target);
+    const config = {};
+    
+    // Process form data
+    for (const [key, value] of formData.entries()) {
+        if (key.includes('.')) {
+            // Handle threshold values
+            const [mainKey, subKey] = key.split('.');
+            if (!config[mainKey]) {
+                config[mainKey] = {};
+            }
+            config[mainKey][subKey] = parseFloat(value);
+        } else if (key === 'DISPLAY_ADDRESS') {
+            // Convert hex string to number
+            config[key] = parseInt(value, 16);
+        } else if (document.getElementById(key).type === 'number') {
+            // Convert numeric inputs
+            config[key] = parseFloat(value);
+        } else {
+            config[key] = value;
+        }
+    }
+    
+    try {
+        const response = await fetch('/api/config', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(config),
+        });
+        
+        const result = await response.json();
+        const status = document.getElementById('status');
+        
+        if (result.status === 'success') {
+            status.textContent = 'Settings saved successfully!';
+            status.className = 'status success';
+        } else {
+            status.textContent = 'Error saving settings: ' + result.message;
+            status.className = 'status error';
+        }
+        
+        status.style.display = 'block';
+        setTimeout(() => {
+            status.style.display = 'none';
+        }, 3000);
+        
+    } catch (error) {
+        console.error('Error:', error);
+    }
+});
+//gecko_controller/web/templates/index.html
+<!DOCTYPE html>
+<html lang="en">
+<head>    
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net">
+    <title>Gecko Controller</title>
+    <style>
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        .card {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+        }
+        h1, h2, h3 {
+            color: #333;
+            margin-top: 0;
+        }
+        label {
+            display: block;
+            margin: 10px 0 5px;
+            color: #666;
+        }
+        input, select {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+            margin-bottom: 10px;
+        }
+        .input-group {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+        .input-group label {
+            margin-bottom: 5px;
+        }
+        button {
+            background: #4CAF50;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-top: 20px;
+            width: 100%;
+        }
+        button:hover {
+            background: #45a049;
+        }
+        .chart-container {
+            position: relative;
+            height: 300px;
+            width: 100%;
+        }
+        .status {
+            padding: 10px;
+            margin-top: 10px;
+            border-radius: 4px;
+            display: none;
+        }
+        .success {
+            background: #d4edda;
+            color: #155724;
+        }
+        .error {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        .section {
+            margin-bottom: 20px;
+        }
+        .threshold-group {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+        .threshold-group input {
+            flex: 1;
+        }
+        hr {
+            border: none;
+            border-top: 1px solid #eee;
+            margin: 20px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Gecko Controller</h1>
+        
+        <div class="grid">
+            <div class="card">
+                <h2>Temperature & Humidity</h2>
+                <div class="chart-container">
+                    <canvas id="tempHumidityChart"></canvas>
+                </div>
+            </div>
+            
+            <div class="card">
+                <h2>UV Levels</h2>
+                <div class="chart-container">
+                    <canvas id="uvChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>Settings</h2>
+            <form id="configForm">
+                <div class="grid">
+                    <div class="section">
+                        <h3>Temperature Control</h3>
+                        <label for="MIN_TEMP">Minimum Temperature (°C)</label>
+                        <input type="number" id="MIN_TEMP" name="MIN_TEMP" step="0.1" min="10" max="40">
+                        
+                        <label for="DAY_TEMP">Day Temperature (°C)</label>
+                        <input type="number" id="DAY_TEMP" name="DAY_TEMP" step="0.1" min="15" max="40">
+                        
+                        <label for="TEMP_TOLERANCE">Temperature Tolerance (±°C)</label>
+                        <input type="number" id="TEMP_TOLERANCE" name="TEMP_TOLERANCE" step="0.1" min="0.1" max="5">
+                    </div>
+
+                    <div class="section">
+                        <h3>Lighting Schedule</h3>
+                        <label for="LIGHT_ON_TIME">Light On Time</label>
+                        <input type="time" id="LIGHT_ON_TIME" name="LIGHT_ON_TIME">
+                        
+                        <label for="LIGHT_OFF_TIME">Light Off Time</label>
+                        <input type="time" id="LIGHT_OFF_TIME" name="LIGHT_OFF_TIME">
+                    </div>
+                </div>
+
+                <hr>
+
+                <div class="grid">
+                    <div class="section">
+                        <h3>UV Thresholds</h3>
+                        <label>UVA Thresholds (μW/cm²)</label>
+                        <div class="threshold-group">
+                            <input type="number" id="UVA_THRESHOLDS_low" name="UVA_THRESHOLDS.low" step="0.1" min="0" placeholder="Low">
+                            <input type="number" id="UVA_THRESHOLDS_high" name="UVA_THRESHOLDS.high" step="0.1" min="0" placeholder="High">
+                        </div>
+                        
+                        <label>UVB Thresholds (μW/cm²)</label>
+                        <div class="threshold-group">
+                            <input type="number" id="UVB_THRESHOLDS_low" name="UVB_THRESHOLDS.low" step="0.1" min="0" placeholder="Low">
+                            <input type="number" id="UVB_THRESHOLDS_high" name="UVB_THRESHOLDS.high" step="0.1" min="0" placeholder="High">
+                        </div>
+                    </div>
+
+                    <div class="section">
+                        <h3>UV Sensor Configuration</h3>
+                        <label for="SENSOR_HEIGHT">Sensor Height (m)</label>
+                        <input type="number" id="SENSOR_HEIGHT" name="SENSOR_HEIGHT" step="0.01" min="0" max="1">
+                        
+                        <label for="LAMP_DIST_FROM_BACK">Lamp Distance from Back (m)</label>
+                        <input type="number" id="LAMP_DIST_FROM_BACK" name="LAMP_DIST_FROM_BACK" step="0.01" min="0" max="1">
+                        
+                        <label for="ENCLOSURE_HEIGHT">Enclosure Height (m)</label>
+                        <input type="number" id="ENCLOSURE_HEIGHT" name="ENCLOSURE_HEIGHT" step="0.01" min="0" max="2">
+                        
+                        <label for="SENSOR_ANGLE">Sensor Angle (degrees)</label>
+                        <input type="number" id="SENSOR_ANGLE" name="SENSOR_ANGLE" step="1" min="0" max="360">
+                    </div>
+                </div>
+
+                <hr>
+
+                <div class="grid">
+                    <div class="section">
+                        <h3>Hardware Configuration</h3>
+                        <label for="DISPLAY_ADDRESS">Display I2C Address (hex)</label>
+                        <input type="text" 
+                               id="DISPLAY_ADDRESS" 
+                               name="DISPLAY_ADDRESS" 
+                               pattern="0x[0-9A-Fa-f]{2}" 
+                               placeholder="0x3c"
+                               onchange="formatI2CAddress(this)">
+                        
+                        <label for="DISPLAY_RESET">Display Reset Pin</label>
+                        <input type="number" id="DISPLAY_RESET" name="DISPLAY_RESET" min="0" max="27">
+                        
+                        <label for="LIGHT_RELAY">Light Relay Pin</label>
+                        <input type="number" id="LIGHT_RELAY" name="LIGHT_RELAY" min="0" max="27">
+                        
+                        <label for="HEAT_RELAY">Heat Relay Pin</label>
+                        <input type="number" id="HEAT_RELAY" name="HEAT_RELAY" min="0" max="27">
+                    </div>
+                </div>
+
+                <button type="submit">Save All Changes</button>
+                <div id="status" class="status"></div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Load Chart.js first -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    
+    <!-- Load your app.js -->
+    <script src="/static/app.js"></script>
+</body>
+</html>

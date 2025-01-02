@@ -476,9 +476,53 @@ class GeckoController:
         return GPIO.input(HEAT_RELAY)
 
     def update_display(self, temp, humidity, uva, uvb, uvc, light_status, heat_status):
-        """Update the display with current readings"""
-        self.create_display_group(temp, humidity, uva, uvb, uvc, light_status, heat_status)
+        """Update display with proper sync handling"""
+        if not hasattr(self, 'last_display_update'):
+            self.last_display_update = 0
 
+        current_time = time.time()
+        if current_time - self.last_display_update < 0.1:
+            return
+
+        try:
+            self.logger.debug("Creating display buffer...")
+            
+            # Create display content synchronously
+            self.create_display_group(
+                temp,
+                humidity,
+                uva,
+                uvb,
+                uvc,
+                light_status,
+                heat_status,
+            )
+
+            # Save image to file
+            image_path = "/var/run/gecko-controller/display.png"
+            os.makedirs(os.path.dirname(image_path), exist_ok=True)
+            self.image.save(image_path, "PNG")
+
+            # Update physical display with timeout protection
+            if self.display:
+                self.logger.debug("Updating physical display...")
+                try:
+                    self.display.show_image(self.image)
+                    self.logger.debug("Physical display updated")
+                except Exception as e:
+                    self.logger.error(f"Physical display update failed: {e}")
+                    self.display = None
+
+            self.last_display_update = current_time
+
+        except Exception as e:
+            self.logger.error(f"Display update failed: {e}", exc_info=True)
+            if current_time - self.last_display_update > 5:
+                try:
+                    self.setup_display()
+                except Exception as setup_error:
+                    self.logger.error(f"Display setup retry failed: {setup_error}")
+                    
     def run(self):
         """Main control loop"""
         try:

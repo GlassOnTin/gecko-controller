@@ -3,7 +3,7 @@
 <head>    
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net data:">
     <title>Gecko Controller</title>
     <style>
         body {
@@ -125,6 +125,11 @@
         </div>
 
         <div class="card">
+            <h2>OLED Display</h2>
+            <div id="liveDisplay"></div>
+        </div>
+
+        <div class="card">
             <h2>Settings</h2>
             <form id="configForm">
                 <div class="grid">
@@ -215,7 +220,7 @@
     </div>
 
     <!-- Load Chart.js first -->
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>   
     
     <!-- Load your app.js -->
     <script src="/static/app.js"></script>

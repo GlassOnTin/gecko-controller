@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 # gecko_controller/web/app.py
+import base64
 from flask import Flask, render_template, jsonify, request, send_from_directory
 import os
 import re
@@ -803,7 +804,41 @@ def get_logs():
     print(f"Returning {len(data['timestamps'])} data points")
             
     return jsonify(data)
-    
+
+@app.route('/api/display', methods=['GET'])
+def get_display():
+    """Get current OLED display image as base64 PNG"""
+    app.logger.debug("Display endpoint accessed")
+
+    try:
+        image_path = "/var/run/gecko-controller/display.png"
+        if not os.path.exists(image_path):
+            return jsonify({
+                'status': 'error',
+                'message': 'Display image not found'
+            }), 404
+
+        # More lenient staleness check - 15 seconds
+        if time.time() - os.path.getmtime(image_path) > 15:
+            app.logger.warning("Display image may be stale")
+            # Continue anyway rather than returning error
+
+        with open(image_path, 'rb') as f:
+            image_data = f.read()
+            image_b64 = base64.b64encode(image_data).decode()
+
+        return jsonify({
+            'status': 'success',
+            'image': image_b64
+        })
+
+    except Exception as e:
+        app.logger.exception("Error in display endpoint")
+        return jsonify({
+            'status': 'error',
+            'message': f'Internal error: {str(e)}'
+        }), 500
+        
 @app.after_request
 def add_header(response):
     response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, post-check=0, pre-check=0, max-age=0'
@@ -813,7 +848,7 @@ def add_header(response):
     
 def main():
     app.logger.info('Starting Flask application...')
-    app.run(host='0.0.0.0', port=80)
+    app.run(host='0.0.0.0', port=80)    
 
 if __name__ == '__main__':
     main()
