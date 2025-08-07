@@ -83,45 +83,58 @@ class SSH1106Display:
 
     def show_image(self, image: Image.Image):
         """Display a PIL Image object"""
-        # Convert image to 1-bit color and rotate if needed
-        if image.mode != '1':
-            image = image.convert('1')
-        
-        # Rotate image 90 degrees clockwise
-        image = image.rotate(180, expand=True)
-        
-        # The SSH1106 has a 132x64 display memory, but only 128x64 is visible
-        # Create a new image with the full 132x64 size
-        full_image = Image.new('1', (132, 64), 255)  # white background
-        
-        # Paste the rotated image in the center of the 132x64 frame
-        paste_x = (132 - image.width) // 2
-        paste_y = (64 - image.height) // 2
-        full_image.paste(image, (paste_x, paste_y))
-        
-        # Set the correct position for the SSH1106
-        self.write_cmd(0x02)  # Set lower column address (to center the 128 columns in 132 width)
-        self.write_cmd(0x10)  # Set higher column address
-        
-        # Write display buffer
-        for page in range(self.pages):
-            self.write_cmd(0xB0 + page)  # Set page address
-            for x in range(132):  # Write all 132 columns
-                bits = 0
-                for bit in range(8):
-                    y = page * 8 + bit
-                    if y < 64 and x < 132:
-                        if full_image.getpixel((x, y)) == 0:  # Black pixel
-                            bits |= (1 << bit)
-                self.write_data(bits)
+        try:
+            # Convert image to 1-bit color and rotate if needed
+            if image.mode != '1':
+                image = image.convert('1')
+            
+            # Rotate image 180 degrees
+            image = image.rotate(180, expand=True)
+            
+            # The SSH1106 has a 132x64 display memory, but only 128x64 is visible
+            # Create a new image with the full 132x64 size
+            full_image = Image.new('1', (132, 64), 255)  # white background
+            
+            # Paste the rotated image in the center of the 132x64 frame
+            paste_x = (132 - image.width) // 2
+            paste_y = (64 - image.height) // 2
+            full_image.paste(image, (paste_x, paste_y))
+            
+            # Write display buffer
+            for page in range(self.pages):
+                self.write_cmd(0xB0 + page)  # Set page address
+                self.write_cmd(0x02)  # Set lower column address
+                self.write_cmd(0x10)  # Set higher column address
+                
+                for x in range(132):  # Write all 132 columns
+                    bits = 0
+                    for bit in range(8):
+                        y = page * 8 + bit
+                        if y < 64 and x < 132:
+                            try:
+                                pixel = full_image.getpixel((x, y))
+                                if pixel == 0:  # Black pixel
+                                    bits |= (1 << bit)
+                            except:
+                                pass  # Skip any pixel that can't be read
+                    self.write_data(bits)
+        except Exception as e:
+            # Silently fail but try to continue
+            print(f"Display error (non-critical): {e}")
 
     def write_cmd(self, cmd: int):
         """Write a command to the display"""
-        self.bus.write_byte_data(self.addr, 0x00, cmd)
+        try:
+            self.bus.write_byte_data(self.addr, 0x00, cmd)
+        except Exception:
+            pass  # Silently fail on I2C errors
 
     def write_data(self, data: int):
         """Write data to the display"""
-        self.bus.write_byte_data(self.addr, 0x40, data)
+        try:
+            self.bus.write_byte_data(self.addr, 0x40, data)
+        except Exception:
+            pass  # Silently fail on I2C errors
 
 class GeckoController:
     def __init__(self):
@@ -196,23 +209,15 @@ class GeckoController:
         # Load regular font
         self.regular_font = load_font("DejaVuSans.ttf", 10)
 
-        # Load OpenSymbol font
-        try:
-            self.icon_font = ImageFont.truetype("/usr/share/fonts/truetype/ancient-scripts/Symbola_hint.ttf", 12)
-        except Exception as e:
-            print(f"Warning: Could not load Symbola font from default path: {e}")
-            print(f"Please install the fonts-symbola package")
-            self.icon_font = ImageFont.load_default()
-            print("Using default font")
-
-        # OpenSymbol Unicode points for relevant symbols
-        self.ICON_CLOCK = "⏲"       
-        self.ICON_HUMIDITY = "🌢"         # for humidity 
-        self.ICON_THERMOMETER = "🌡"  
-        self.ICON_TARGET = "🞋"      
-        self.ICON_GOOD = "☺"       
-        self.ICON_TOO_LOW = "🌜"     
-        self.ICON_TOO_HIGH = "⚠"    
+        # Use ASCII characters instead of Unicode emojis to avoid encoding issues
+        # These will work with any font
+        self.ICON_CLOCK = "T:"       
+        self.ICON_HUMIDITY = "H:"         
+        self.ICON_THERMOMETER = "C:"  
+        self.ICON_TARGET = "@"      
+        self.ICON_GOOD = "OK"       
+        self.ICON_TOO_LOW = "LO"     
+        self.ICON_TOO_HIGH = "HI"    
         self.ICON_ERROR = "?"
 
     @staticmethod
@@ -236,23 +241,34 @@ class GeckoController:
         os.makedirs(LOG_DIR, exist_ok=True)
         log_file = Path(LOG_DIR + "/" + LOG_FILE)
         
-        # Configure main logger
-        self.logger = logging.getLogger("gecko_controller")
-        self.logger.setLevel(logging.INFO)
+        # Configure data logger for CSV output
+        self.data_logger = logging.getLogger("gecko_controller.data")
+        self.data_logger.setLevel(logging.INFO)
+        self.data_logger.propagate = False  # Don't propagate to root logger
         
-        # Create rotating file handler
-        handler = logging.handlers.RotatingFileHandler(
+        # Create rotating file handler for data
+        data_handler = logging.handlers.RotatingFileHandler(
             log_file,
             maxBytes=MAX_LOG_SIZE,
             backupCount=LOG_BACKUP_COUNT
         )
         
-        # Create formatter
-        formatter = logging.Formatter(
+        # Create formatter for CSV data
+        data_formatter = logging.Formatter(
             '%(asctime)s,%(temp).1f,%(humidity).1f,%(uva).4f,%(uvb).4f,%(uvc).4f,%(light)d,%(heat)d'
         )
-        handler.setFormatter(formatter)
-        self.logger.addHandler(handler)
+        data_handler.setFormatter(data_formatter)
+        self.data_logger.addHandler(data_handler)
+        
+        # Configure debug logger for error messages
+        self.logger = logging.getLogger("gecko_controller")
+        self.logger.setLevel(logging.DEBUG)
+        
+        # Create console handler for debug messages
+        console_handler = logging.StreamHandler()
+        console_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+        console_handler.setFormatter(console_formatter)
+        self.logger.addHandler(console_handler)
 
     def setup_display(self):
         """Initialize the display"""
@@ -344,13 +360,13 @@ class GeckoController:
         
         # Top row - Time and Humidity
         current_time = datetime.now().strftime("%H:%M")
-        self.draw.text((4, 4), self.ICON_CLOCK, font=self.icon_font, fill=0)
+        self.draw.text((4, 4), self.ICON_CLOCK, font=self.regular_font, fill=0)
         self.draw.text((20, 4), current_time, font=self.regular_font, fill=0)
 
         # Humidity
         humidity_text = f"{humidity:4.1f}%" if humidity is not None else "--.-%"
-        self.draw.text((68, 4), self.ICON_HUMIDITY, font=self.icon_font, fill=0)
-        self.draw.text((84, 4), humidity_text, font=self.regular_font, fill=0)
+        self.draw.text((60, 4), self.ICON_HUMIDITY, font=self.regular_font, fill=0)
+        self.draw.text((74, 4), humidity_text, font=self.regular_font, fill=0)
 
         # Temperature
         if temp is not None:
@@ -361,19 +377,19 @@ class GeckoController:
             temp_text = "--.-C"
             target_text = "--.-C"
 
-        self.draw.text((4, 20), self.ICON_THERMOMETER, font=self.icon_font, fill=0)
+        self.draw.text((4, 20), self.ICON_THERMOMETER, font=self.regular_font, fill=0)
         self.draw.text((20, 20), temp_text, font=self.regular_font, fill=0)
-        self.draw.text((68, 20), self.ICON_TARGET, font=self.icon_font, fill=0)
-        self.draw.text((84, 20), target_text, font=self.regular_font, fill=0)
+        self.draw.text((60, 20), self.ICON_TARGET, font=self.regular_font, fill=0)
+        self.draw.text((74, 20), target_text, font=self.regular_font, fill=0)
 
         # UV readings
         uva_icon = self.get_uv_status_icon(uva, is_uvb=False)
         uvb_icon = self.get_uv_status_icon(uvb, is_uvb=True)
         
-        self.draw.text((4, 36), "UVA", font=self.regular_font, fill=0)
-        self.draw.text((36, 36), uva_icon, font=self.icon_font, fill=0)
-        self.draw.text((68, 36), "UVB", font=self.regular_font, fill=0)
-        self.draw.text((100, 36), uvb_icon, font=self.icon_font, fill=0)
+        self.draw.text((4, 36), "UVA:", font=self.regular_font, fill=0)
+        self.draw.text((36, 36), uva_icon, font=self.regular_font, fill=0)
+        self.draw.text((68, 36), "UVB:", font=self.regular_font, fill=0)
+        self.draw.text((100, 36), uvb_icon, font=self.regular_font, fill=0)
 
         # Status and Schedule
         status_text = f"{'L:ON ' if light_status else 'L:OFF'} {'H:ON' if heat_status else 'H:OFF'}"
@@ -394,7 +410,7 @@ class GeckoController:
         """Log readings if enough time has passed"""
         current_time = time.time()
         if current_time - self.last_log_time >= LOG_INTERVAL:
-            self.logger.info(
+            self.data_logger.info(
                 "",
                 extra={
                     'temp': temp if temp is not None else -1,
@@ -500,8 +516,14 @@ class GeckoController:
 
             # Save image to file
             image_path = "/var/run/gecko-controller/display.png"
-            os.makedirs(os.path.dirname(image_path), exist_ok=True)
-            self.image.save(image_path, "PNG")
+            try:
+                os.makedirs(os.path.dirname(image_path), mode=0o755, exist_ok=True)
+                self.image.save(image_path, "PNG")
+            except Exception as save_err:
+                # Try alternative location if /var/run is not writable
+                alt_path = "/tmp/gecko-controller-display.png"
+                self.image.save(alt_path, "PNG")
+                self.logger.debug(f"Saved display to alternative path: {alt_path}")
 
             # Update physical display with timeout protection
             if self.display:
@@ -510,8 +532,15 @@ class GeckoController:
                     self.display.show_image(self.image)
                     self.logger.debug("Physical display updated")
                 except Exception as e:
-                    self.logger.error(f"Physical display update failed: {e}")
-                    self.display = None
+                    # Convert error to string to avoid encoding issues
+                    error_msg = str(e).encode('ascii', 'ignore').decode('ascii')
+                    self.logger.error(f"Physical display update failed: {error_msg}")
+                    # Try to reinitialize display
+                    try:
+                        self.setup_display()
+                        self.display.show_image(self.image)
+                    except:
+                        self.display = None
 
             self.last_display_update = current_time
 

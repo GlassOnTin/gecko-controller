@@ -811,8 +811,19 @@ def get_display():
     app.logger.debug("Display endpoint accessed")
 
     try:
-        image_path = "/var/run/gecko-controller/display.png"
-        if not os.path.exists(image_path):
+        # Try primary location first, then fallback
+        image_paths = [
+            "/var/run/gecko-controller/display.png",
+            "/tmp/gecko-controller-display.png"
+        ]
+        
+        image_path = None
+        for path in image_paths:
+            if os.path.exists(path):
+                image_path = path
+                break
+        
+        if not image_path:
             return jsonify({
                 'status': 'error',
                 'message': 'Display image not found'
