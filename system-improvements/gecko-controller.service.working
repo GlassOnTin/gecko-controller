@@ -1,0 +1,31 @@
+[Unit]
+Description=Gecko Enclosure Controller
+After=network.target
+StartLimitIntervalSec=600
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/home/ian/gecko-controller
+Environment=PYTHONPATH=/home/ian/gecko-controller
+ExecStart=/usr/bin/python3 -m gecko_controller.controller
+
+# Restart configuration
+Restart=always
+RestartSec=10
+
+# Timeouts
+TimeoutStartSec=120
+
+# Resource limits
+MemoryMax=256M
+CPUQuota=50%
+
+# Standard logging
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
