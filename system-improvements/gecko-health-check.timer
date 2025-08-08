@@ -1,0 +1,11 @@
+[Unit]
+Description=Run Gecko Controller Health Check every 5 minutes
+Requires=gecko-health-check.service
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=5min
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target

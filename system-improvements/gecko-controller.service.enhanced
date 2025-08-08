@@ -1,0 +1,50 @@
+[Unit]
+Description=Gecko Enclosure Controller
+After=network.target
+StartLimitIntervalSec=600
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/home/ian/gecko-controller
+Environment=PYTHONPATH=/home/ian/gecko-controller
+
+# Main service command
+ExecStart=/usr/bin/python3 -m gecko_controller.controller
+
+# Restart configuration
+Restart=always
+RestartSec=10
+RestartPreventExitStatus=0
+
+# Watchdog configuration - service must ping systemd every 30 seconds
+WatchdogSec=30
+# Give it up to 2 minutes to start
+TimeoutStartSec=120
+# Give it 30 seconds to stop gracefully
+TimeoutStopSec=30
+
+# Resource limits to prevent memory leaks from consuming all RAM
+MemoryMax=256M
+MemorySwapMax=128M
+CPUQuota=50%
+
+# Kill all processes in the control group when service stops
+KillMode=control-group
+KillSignal=SIGTERM
+
+# Log output
+StandardOutput=journal
+StandardError=journal
+
+# Security hardening
+PrivateTmp=true
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/home/ian/gecko-controller
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,10 @@
+[Unit]
+Description=Gecko Controller Health Check
+After=gecko-controller.service
+Requires=gecko-controller.service
+
+[Service]
+Type=oneshot
+ExecStart=/home/ian/gecko-health-check.sh
+StandardOutput=journal
+StandardError=journal
