@@ -65,13 +65,13 @@ class GeckoMQTTClient:
         # Binary sensor configurations (for on/off states)
         self.binary_sensors = {
             "light_status": {
-                "name": "Light Status",
-                "device_class": "light",
+                "name": "Light Relay",
+                "device_class": "power",
                 "icon": "mdi:lightbulb"
             },
             "heat_status": {
-                "name": "Heat Status",
-                "device_class": "heat",
+                "name": "Heat Relay",
+                "device_class": "power",
                 "icon": "mdi:radiator"
             }
         }

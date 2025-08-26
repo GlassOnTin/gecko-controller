@@ -185,3 +185,7 @@ debhelper-build-stamp
 /.vagrant
 /*/debian/files.pybuild/
 debian/gecko-controller
+.git.corrupted.backup/
+check_display.py
+current_display.png
+test_display.py

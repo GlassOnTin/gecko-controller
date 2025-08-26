@@ -214,8 +214,8 @@ The following sensors will automatically appear in Home Assistant:
 - **UVA Level** - UVA radiation (μW/cm²)
 - **UVB Level** - UVB radiation (μW/cm²)
 - **UVC Level** - UVC radiation (μW/cm²)
-- **Light Status** - Light relay state (ON/OFF)
-- **Heat Status** - Heat relay state (ON/OFF)
+- **Light Relay** - Light relay control state (ON/OFF based on schedule)
+- **Heat Relay** - Heat relay control state (ON/OFF based on temperature)
 - **Target Temperature** - Current temperature setpoint (°C)
 
 ### Troubleshooting MQTT
