@@ -11,6 +11,7 @@ from PIL import Image, ImageDraw, ImageFont
 import pathlib
 from typing import Tuple, Optional
 from pathlib import Path
+from gecko_controller.mqtt_client import GeckoMQTTClient
 
 # Constants for logging
 LOG_DIR = "/var/log/gecko-controller"
@@ -148,6 +149,28 @@ class GeckoController:
             GPIO.output(DISPLAY_RESET, GPIO.HIGH)  # Start with reset inactive
 
         self.setup_display()
+        
+        # Initialize MQTT client if enabled
+        self.mqtt_client = None
+        self.last_mqtt_publish = 0
+        if globals().get('MQTT_ENABLED', False):
+            try:
+                self.mqtt_client = GeckoMQTTClient(
+                    broker=globals().get('MQTT_BROKER', 'homeassistant.local'),
+                    port=globals().get('MQTT_PORT', 1883),
+                    username=globals().get('MQTT_USERNAME'),
+                    password=globals().get('MQTT_PASSWORD'),
+                    topic_prefix=globals().get('MQTT_TOPIC_PREFIX', 'gecko'),
+                    device_id=globals().get('MQTT_DEVICE_ID', 'gecko_controller')
+                )
+                if self.mqtt_client.connect():
+                    print("MQTT connected successfully")
+                else:
+                    print("MQTT connection failed, continuing without MQTT")
+                    self.mqtt_client = None
+            except Exception as e:
+                print(f"MQTT initialization error: {e}")
+                self.mqtt_client = None
         self.setup_logging()
         self.last_log_time = 0
         self.bus = smbus2.SMBus(1)
@@ -569,11 +592,30 @@ class GeckoController:
                                       light_status, heat_status)
                     self.log_readings(temp, humidity, uva, uvb, uvc,
                                     light_status, heat_status)
+                    
+                    # Publish to MQTT if enabled
+                    if self.mqtt_client and time.time() - self.last_mqtt_publish >= globals().get('MQTT_PUBLISH_INTERVAL', 60):
+                        target_temp = self.get_target_temp()
+                        mqtt_data = {
+                            "temperature": temp,
+                            "humidity": humidity,
+                            "uva": uva,
+                            "uvb": uvb,
+                            "uvc": uvc,
+                            "light_status": light_status,
+                            "heat_status": heat_status,
+                            "target_temperature": target_temp
+                        }
+                        if self.mqtt_client.publish_data(mqtt_data):
+                            self.last_mqtt_publish = time.time()
+                            
                 time.sleep(10)
 
         except KeyboardInterrupt:
             print("\nShutting down...")
         finally:
+            if self.mqtt_client:
+                self.mqtt_client.disconnect()
             GPIO.cleanup()
 
 def main():

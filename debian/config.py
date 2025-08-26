@@ -36,3 +36,13 @@ SENSOR_HEIGHT = 0.2
 LAMP_DIST_FROM_BACK = 0.3
 ENCLOSURE_HEIGHT = 0.5
 SENSOR_ANGLE = 90
+
+# MQTT Settings for Home Assistant Integration
+MQTT_ENABLED = True
+MQTT_BROKER = "homeassistant.local"
+MQTT_PORT = 1883
+MQTT_USERNAME = "mqtt"
+MQTT_PASSWORD = "mqtt"
+MQTT_TOPIC_PREFIX = "gecko"
+MQTT_DEVICE_ID = "gecko_controller"
+MQTT_PUBLISH_INTERVAL = 60  # seconds

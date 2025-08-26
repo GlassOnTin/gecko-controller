@@ -26,6 +26,10 @@ A Raspberry Pi-based temperature, light, and UV controller for gecko vivarium mo
   - Historical data visualization
   - Mobile-friendly responsive design
 - Logging of environmental conditions
+- MQTT Home Assistant integration with auto-discovery
+  - Automatic sensor entity creation
+  - Real-time data publishing
+  - No manual configuration required
 
 ## Hardware Requirements
 
@@ -155,6 +159,16 @@ SENSOR_HEIGHT = 0.2
 LAMP_DIST_FROM_BACK = 0.3
 ENCLOSURE_HEIGHT = 0.5
 SENSOR_ANGLE = 90
+
+# MQTT Settings for Home Assistant Integration
+MQTT_ENABLED = True
+MQTT_BROKER = "homeassistant.local"
+MQTT_PORT = 1883
+MQTT_USERNAME = "mqtt"
+MQTT_PASSWORD = "mqtt"
+MQTT_TOPIC_PREFIX = "gecko"
+MQTT_DEVICE_ID = "gecko_controller"
+MQTT_PUBLISH_INTERVAL = 60  # seconds
 ```
 
 ## GPIO Wiring
@@ -166,6 +180,38 @@ SENSOR_ANGLE = 90
 | Display Reset     | GPIO 21  | Optional, HIGH for normal|
 | I2C SDA           | GPIO 2   | For all I2C devices      |
 | I2C SCL           | GPIO 3   | For all I2C devices      |
+
+## Home Assistant MQTT Integration
+
+The gecko controller automatically publishes sensor data to Home Assistant via MQTT with zero configuration required on the Home Assistant side.
+
+### Setup
+
+1. Ensure MQTT is enabled in your Home Assistant installation
+2. Configure MQTT settings in `/etc/gecko-controller/config.py`
+3. Restart the gecko-controller service:
+   ```bash
+   sudo systemctl restart gecko-controller
+   ```
+
+### Testing MQTT Connection
+
+```bash
+cd /home/ian/gecko-controller
+python3 test_mqtt.py
+```
+
+### Available Sensors
+
+The following sensors will automatically appear in Home Assistant:
+- **Temperature** - Current vivarium temperature (°C)
+- **Humidity** - Current humidity level (%)
+- **UVA Level** - UVA radiation (μW/cm²)
+- **UVB Level** - UVB radiation (μW/cm²)
+- **UVC Level** - UVC radiation (μW/cm²)
+- **Light Status** - Light relay state (ON/OFF)
+- **Heat Status** - Heat relay state (ON/OFF)
+- **Target Temperature** - Current temperature setpoint (°C)
 
 ## Troubleshooting
 
