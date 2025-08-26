@@ -87,7 +87,7 @@ A Raspberry Pi-based temperature, light, and UV controller for gecko vivarium mo
 
 3. Install required packages:
    ```bash
-   python3 -m pip install RPi.GPIO smbus2 Pillow Flask
+   python3 -m pip install RPi.GPIO smbus2 Pillow Flask paho-mqtt
    ```
 
 4. Run the controller:
@@ -201,6 +201,11 @@ cd /home/ian/gecko-controller
 python3 test_mqtt.py
 ```
 
+To remove test devices if needed:
+```bash
+python3 cleanup_mqtt_test.py
+```
+
 ### Available Sensors
 
 The following sensors will automatically appear in Home Assistant:
@@ -212,6 +217,13 @@ The following sensors will automatically appear in Home Assistant:
 - **Light Status** - Light relay state (ON/OFF)
 - **Heat Status** - Heat relay state (ON/OFF)
 - **Target Temperature** - Current temperature setpoint (°C)
+
+### Troubleshooting MQTT
+
+- **No device in Home Assistant**: Check MQTT broker connectivity with `python3 test_mqtt.py`
+- **Duplicate devices**: Run `python3 cleanup_mqtt_test.py` to remove test devices
+- **No data updates**: Verify service is running: `sudo systemctl status gecko-controller`
+- **Connection issues**: Check firewall rules and ensure port 1883 is accessible
 
 ## Troubleshooting
 
