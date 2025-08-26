@@ -217,6 +217,10 @@ The following sensors will automatically appear in Home Assistant:
 - **Light Relay** - Light relay control state (ON/OFF based on schedule)
 - **Heat Relay** - Heat relay control state (ON/OFF based on temperature)
 - **Target Temperature** - Current temperature setpoint (°C)
+- **Next Light Change** - Next scheduled light transition (e.g., "→OFF at 19:30")
+- **Time Until Change** - Countdown to next transition (e.g., "2h50m")
+- **Controller Time** - Current time on the controller
+- **Light Schedule** - Daily light schedule (e.g., "ON 07:30 - OFF 19:30")
 
 ### Troubleshooting MQTT
 

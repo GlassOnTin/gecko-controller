@@ -122,6 +122,26 @@ class GeckoMQTTClient:
                 "icon": "mdi:thermometer-lines",
                 "value_template": "{{ value }}",
                 "state_class": "measurement"
+            },
+            "next_transition": {
+                "name": "Next Light Change",
+                "icon": "mdi:calendar-clock",
+                "value_template": "{{ value }}"
+            },
+            "time_until_transition": {
+                "name": "Time Until Change",
+                "icon": "mdi:timer-sand",
+                "value_template": "{{ value }}"
+            },
+            "current_time": {
+                "name": "Controller Time",
+                "icon": "mdi:clock-digital",
+                "value_template": "{{ value }}"
+            },
+            "light_schedule": {
+                "name": "Light Schedule",
+                "icon": "mdi:clock-time-four",
+                "value_template": "{{ value }}"
             }
         }
     

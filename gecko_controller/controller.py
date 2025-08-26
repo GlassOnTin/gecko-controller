@@ -596,6 +596,10 @@ class GeckoController:
                     # Publish to MQTT if enabled
                     if self.mqtt_client and time.time() - self.last_mqtt_publish >= globals().get('MQTT_PUBLISH_INTERVAL', 60):
                         target_temp = self.get_target_temp()
+                        next_state, next_time = self.get_next_transition()
+                        time_until = self.format_time_until(next_time)
+                        current_time = datetime.now().strftime("%H:%M")
+                        
                         mqtt_data = {
                             "temperature": temp,
                             "humidity": humidity,
@@ -604,7 +608,11 @@ class GeckoController:
                             "uvc": uvc,
                             "light_status": light_status,
                             "heat_status": heat_status,
-                            "target_temperature": target_temp
+                            "target_temperature": target_temp,
+                            "next_transition": f"{next_state} at {next_time.strftime('%H:%M')}",
+                            "time_until_transition": time_until,
+                            "current_time": current_time,
+                            "light_schedule": f"ON {LIGHT_ON_TIME} - OFF {LIGHT_OFF_TIME}"
                         }
                         if self.mqtt_client.publish_data(mqtt_data):
                             self.last_mqtt_publish = time.time()
