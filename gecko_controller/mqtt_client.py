@@ -62,7 +62,21 @@ class GeckoMQTTClient:
             "sw_version": "1.0.0"
         }
         
-        # Sensor configurations
+        # Binary sensor configurations (for on/off states)
+        self.binary_sensors = {
+            "light_status": {
+                "name": "Light Status",
+                "device_class": "light",
+                "icon": "mdi:lightbulb"
+            },
+            "heat_status": {
+                "name": "Heat Status",
+                "device_class": "heat",
+                "icon": "mdi:radiator"
+            }
+        }
+        
+        # Regular sensor configurations (for measurements)
         self.sensors = {
             "temperature": {
                 "name": "Vivarium Temperature",
@@ -100,18 +114,6 @@ class GeckoMQTTClient:
                 "icon": "mdi:radioactive",
                 "value_template": "{{ value }}",
                 "state_class": "measurement"
-            },
-            "light_status": {
-                "name": "Light Status",
-                "device_class": "power",
-                "icon": "mdi:lightbulb",
-                "value_template": "{{ 'ON' if value else 'OFF' }}"
-            },
-            "heat_status": {
-                "name": "Heat Status",
-                "device_class": "power",
-                "icon": "mdi:radiator",
-                "value_template": "{{ 'ON' if value else 'OFF' }}"
             },
             "target_temperature": {
                 "name": "Target Temperature",
@@ -189,6 +191,7 @@ class GeckoMQTTClient:
     def _publish_discovery(self):
         """Publish Home Assistant MQTT discovery messages"""
         try:
+            # Publish regular sensors
             for sensor_id, config in self.sensors.items():
                 discovery_topic = f"homeassistant/sensor/{self.device_id}/{sensor_id}/config"
                 state_topic = f"{self.topic_prefix}/{self.device_id}/{sensor_id}/state"
@@ -215,9 +218,44 @@ class GeckoMQTTClient:
                 )
                 
                 if result.rc == mqtt.MQTT_ERR_SUCCESS:
-                    self.logger.debug(f"Published discovery for {sensor_id}")
+                    self.logger.debug(f"Published discovery for sensor {sensor_id}")
                 else:
-                    self.logger.error(f"Failed to publish discovery for {sensor_id}")
+                    self.logger.error(f"Failed to publish discovery for sensor {sensor_id}")
+                
+                # Small delay between discovery messages
+                time.sleep(0.1)
+            
+            # Publish binary sensors
+            for sensor_id, config in self.binary_sensors.items():
+                discovery_topic = f"homeassistant/binary_sensor/{self.device_id}/{sensor_id}/config"
+                state_topic = f"{self.topic_prefix}/{self.device_id}/{sensor_id}/state"
+                
+                payload = {
+                    "name": config["name"],
+                    "state_topic": state_topic,
+                    "unique_id": f"{self.device_id}_{sensor_id}",
+                    "device": self.device_info,
+                    "payload_on": "ON",
+                    "payload_off": "OFF"
+                }
+                
+                # Add optional fields if present
+                for field in ["device_class", "icon"]:
+                    if field in config:
+                        payload[field] = config[field]
+                
+                # Publish discovery message with retain flag
+                result = self.client.publish(
+                    discovery_topic,
+                    json.dumps(payload),
+                    qos=1,
+                    retain=True
+                )
+                
+                if result.rc == mqtt.MQTT_ERR_SUCCESS:
+                    self.logger.debug(f"Published discovery for binary_sensor {sensor_id}")
+                else:
+                    self.logger.error(f"Failed to publish discovery for binary_sensor {sensor_id}")
                 
                 # Small delay between discovery messages
                 time.sleep(0.1)
@@ -243,6 +281,7 @@ class GeckoMQTTClient:
         try:
             published_count = 0
             
+            # Publish regular sensor values
             for key, value in data.items():
                 if key in self.sensors and value is not None:
                     state_topic = f"{self.topic_prefix}/{self.device_id}/{key}/state"
@@ -254,6 +293,22 @@ class GeckoMQTTClient:
                         payload = f"{value:.2f}"
                     else:
                         payload = str(value)
+                    
+                    result = self.client.publish(state_topic, payload, qos=1)
+                    
+                    if result.rc == mqtt.MQTT_ERR_SUCCESS:
+                        published_count += 1
+                        self.logger.debug(f"Published {key}: {payload}")
+                    else:
+                        self.logger.error(f"Failed to publish {key}")
+            
+            # Publish binary sensor values
+            for key, value in data.items():
+                if key in self.binary_sensors and value is not None:
+                    state_topic = f"{self.topic_prefix}/{self.device_id}/{key}/state"
+                    
+                    # Format binary value as ON/OFF
+                    payload = "ON" if value else "OFF"
                     
                     result = self.client.publish(state_topic, payload, qos=1)
                     
