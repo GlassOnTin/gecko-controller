@@ -18,6 +18,15 @@ log_message() {
     fi
 }
 
+# Check RTC is available
+if [ ! -e /dev/rtc0 ]; then
+    log_message "WARNING: RTC device /dev/rtc0 not found. Check dtoverlay=i2c-rtc,ds3231 in /boot/firmware/config.txt"
+    # Check if RTC is on I2C bus
+    if i2cdetect -y 1 2>/dev/null | grep -q "68"; then
+        log_message "INFO: RTC detected on I2C bus at 0x68 but not configured in device tree"
+    fi
+fi
+
 # Check if service is active
 if ! systemctl is-active --quiet "$SERVICE_NAME"; then
     log_message "ERROR: $SERVICE_NAME is not active. Attempting restart..."

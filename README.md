@@ -33,6 +33,7 @@ A Raspberry Pi-based temperature, light, and UV controller for gecko vivarium mo
 - SSH1106 OLED Display (I2C interface)
 - SHT31 Temperature/Humidity Sensor
 - AS7331 Spectral UV Sensor
+- DS3231 Real-Time Clock (I2C interface, address 0x68)
 - 2x Relay modules (for light and heat control)
 - Compatible 5V power supply
 - I2C-compatible cables and connectors
@@ -41,10 +42,16 @@ A Raspberry Pi-based temperature, light, and UV controller for gecko vivarium mo
 
 ### Method 1: Using the Debian Package (Recommended)
 
-1. Enable I2C on your Raspberry Pi:
+1. Enable I2C and configure RTC on your Raspberry Pi:
    ```bash
    sudo raspi-config
    # Navigate to Interface Options > I2C > Enable
+   
+   # Add RTC overlay to /boot/firmware/config.txt:
+   echo "dtoverlay=i2c-rtc,ds3231" | sudo tee -a /boot/firmware/config.txt
+   
+   # Reboot for changes to take effect
+   sudo reboot
    ```
 
 2. Install the package:
@@ -165,17 +172,38 @@ SENSOR_ANGLE = 90
 1. Check I2C devices are detected:
    ```bash
    sudo i2cdetect -y 1
+   # Expected devices:
+   # 0x3c - OLED Display
+   # 0x44 - SHT31 Temperature/Humidity Sensor  
+   # 0x68 - DS3231 RTC
+   # 0x74 - AS7331 UV Sensor
+   ```
+   
+2. Verify RTC is working:
+   ```bash
+   # Check if RTC device exists
+   ls -la /dev/rtc*
+   
+   # Read hardware clock time
+   sudo hwclock --show
+   
+   # Check system time configuration
+   timedatectl status
    ```
 
-2. View service logs:
+3. View service logs:
    ```bash
    journalctl -u gecko-controller -f
    ```
 
-3. Common issues:
+4. Common issues:
    - If display shows no data, check I2C connections and addresses
    - If UV readings show as "None", verify AS7331 sensor connection
    - For temperature/humidity errors, check SHT31 sensor wiring
+   - If time is incorrect after reboot:
+     - Ensure RTC overlay is in `/boot/firmware/config.txt`: `dtoverlay=i2c-rtc,ds3231`
+     - Verify RTC is detected at address 0x68 with `sudo i2cdetect -y 1`
+     - Check RTC battery voltage (should be ~3V)
 
 ## Contributing
 
